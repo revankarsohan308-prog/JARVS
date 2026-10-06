@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     # Public origin used for the OAuth redirect URI behind a reverse proxy;
     # empty = derive from the incoming request.
     public_base_url: str = ""
+    # Endpoint overrides: use an OIDC-compliant server other than the default
+    # (Keycloak, Authentik, Azure AD, verification servers). Empty = default.
+    google_authorization_url: str = ""
+    google_token_url: str = ""
+    google_userinfo_url: str = ""
+    linkedin_authorization_url: str = ""
+    linkedin_token_url: str = ""
+    linkedin_userinfo_url: str = ""
 
     # Brain -----------------------------------------------------------------
     wake_word: str = "hey jarvis"

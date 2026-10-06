@@ -282,6 +282,29 @@ def test_social_account_cannot_password_login(client, db, google_configured, mon
     assert resp.status_code == 401  # unusable password by design
 
 
+def test_endpoint_overrides_target_an_alternative_oidc_server(client, google_configured, monkeypatch):
+    """Custom OIDC servers (Keycloak/verification IdP) are a config change."""
+    from core.identity import oauth as oauth_mod
+
+    monkeypatch.setattr(google_configured, "google_authorization_url", "http://oidc.local/authorize")
+    monkeypatch.setattr(google_configured, "google_token_url", "http://oidc.local/token")
+    monkeypatch.setattr(google_configured, "google_userinfo_url", "http://oidc.local/userinfo")
+
+    resp = client.get("/api/v1/auth/oauth/google/start", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith("http://oidc.local/authorize?")
+
+    seen: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        oauth_mod, "_post_json", lambda url, data: seen.append((url, data)) or {"access_token": "t"}
+    )
+    monkeypatch.setattr(oauth_mod, "_get_json", lambda url, headers: seen.append((url, {})) or {"sub": "x"})
+
+    state = parse_qs(urlparse(resp.headers["location"]).query)["state"][0]
+    finish_flow(client, state)
+    assert [url for url, _ in seen] == ["http://oidc.local/token", "http://oidc.local/userinfo"]
+
+
 def test_provider_consent_denial_is_reported_not_hidden(client, db, google_configured):
     state = start_flow(client)
     resp = client.get(

@@ -51,7 +51,7 @@ Open <http://127.0.0.1:8760>. The **first account you register becomes the
 SUPER_ADMIN**; every later registration starts as STUDENT.
 
 ```powershell
-# Run the test suite (94 tests) and the linter
+# Run the test suite (95 tests) and the linter
 .\.venv\Scripts\python -m pytest -q
 .\.venv\Scripts\python -m ruff check .
 ```

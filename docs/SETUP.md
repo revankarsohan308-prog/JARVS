@@ -49,6 +49,11 @@ exact variables required — it never pretends to work.
 Behind a reverse proxy set `ALYO_PUBLIC_BASE_URL=https://your-domain` so the
 redirect URI matches what you registered with the provider.
 
+The endpoints themselves are overridable (`ALYO_GOOGLE_AUTHORIZATION_URL`,
+`ALYO_GOOGLE_TOKEN_URL`, `ALYO_GOOGLE_USERINFO_URL`, same for LinkedIn), so
+sign-in can point at any OIDC-compliant server — Keycloak, Authentik, Azure AD,
+or an internal verification server — without touching code.
+
 ## Run
 
 ```powershell
@@ -62,7 +67,7 @@ First run creates `data/alyo.db` and seeds nothing —
 ## Verify the installation
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q   # expect: 94 passed
+.\.venv\Scripts\python -m pytest -q   # expect: 95 passed
 .\.venv\Scripts\python -m ruff check . # expect: All checks passed!
 Invoke-RestMethod http://127.0.0.1:8760/api/v1/system/health
 ```

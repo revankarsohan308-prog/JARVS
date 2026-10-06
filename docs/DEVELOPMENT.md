@@ -3,7 +3,7 @@
 ## Commands
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q          # test suite (94 tests)
+.\.venv\Scripts\python -m pytest -q          # test suite (95 tests)
 .\.venv\Scripts\python -m pytest tests/test_brain.py -q
 .\.venv\Scripts\python -m ruff check .       # lint (clean baseline)
 .\.venv\Scripts\python -m ruff check . --fix # auto-fix

@@ -21,7 +21,7 @@ tested and documented.
 - [x] Privacy: retention policy, export, truthful deletion statuses, retention
       worker (§16)
 - [x] Clean web interface (chat, tasks, memory, system, security, privacy)
-- [x] 94 tests passing, Ruff clean, full documentation set
+- [x] 95 tests passing, Ruff clean, full documentation set
 
 ## Milestone 2 — Conversation depth & reliability (proposed)
 

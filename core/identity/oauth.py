@@ -164,6 +164,17 @@ def decode_state_cookie(raw: str | None) -> dict | None:
         return None
 
 
+def endpoint(provider: Provider, kind: str) -> str:
+    """Effective endpoint URL (``kind``: authorization | token | userinfo).
+
+    Defaults to the provider's public endpoint; an ``ALYO_<PROVIDER>_<KIND>_URL``
+    override lets a deployment point sign-in at any OIDC-compliant server
+    (Keycloak, Authentik, Azure AD, an internal verification server).
+    """
+    override = getattr(settings, f"{provider.id}_{kind}_url", "")
+    return override or getattr(provider, f"{kind}_endpoint")
+
+
 def build_authorization_url(provider: Provider, redirect_uri: str, state: str, challenge: str) -> str:
     from urllib.parse import urlencode
 
@@ -177,8 +188,9 @@ def build_authorization_url(provider: Provider, redirect_uri: str, state: str, c
         "code_challenge_method": "S256",
         **provider.extra_auth_params,
     }
-    sep = "&" if "?" in provider.authorization_endpoint else "?"
-    return f"{provider.authorization_endpoint}{sep}{urlencode(params)}"
+    target = endpoint(provider, "authorization")
+    sep = "&" if "?" in target else "?"
+    return f"{target}{sep}{urlencode(params)}"
 
 
 # ----------------------------------------------------------------------
@@ -201,7 +213,7 @@ def exchange_code(provider: Provider, code: str, redirect_uri: str, verifier: st
     """Authorization code → access token (one call, no token stored)."""
     try:
         payload = _post_json(
-            provider.token_endpoint,
+            endpoint(provider, "token"),
             {
                 "grant_type": "authorization_code",
                 "code": code,
@@ -227,7 +239,7 @@ def exchange_code(provider: Provider, code: str, redirect_uri: str, verifier: st
 
 def fetch_userinfo(provider: Provider, access_token: str) -> dict:
     try:
-        info = _get_json(provider.userinfo_endpoint, {"Authorization": f"Bearer {access_token}"})
+        info = _get_json(endpoint(provider, "userinfo"), {"Authorization": f"Bearer {access_token}"})
     except httpx.HTTPError as exc:
         raise OAuthError(
             f"{provider.display_name} did not respond to the identity request ({type(exc).__name__}). "
