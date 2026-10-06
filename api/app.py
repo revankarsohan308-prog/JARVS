@@ -20,6 +20,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from config.settings import PROJECT_ROOT, settings
+from core.agent.registry import registry
+from core.brain import orchestrator
+from database.session import SessionLocal, init_db
+from security import monitoring
+from security.audit import audit
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -35,12 +41,6 @@ class NoCacheStaticFiles(StaticFiles):
         response.headers["Cache-Control"] = "no-cache"
         return response
 
-from config.settings import PROJECT_ROOT, settings
-from core.agent.registry import registry
-from core.brain import orchestrator
-from database.session import SessionLocal, init_db
-from security import monitoring
-from security.audit import audit
 
 logger = logging.getLogger("alyo")
 
