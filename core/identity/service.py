@@ -80,7 +80,10 @@ def register_user(
     if len(password or "") < _MIN_PASSWORD_LEN:
         raise IdentityError(f"Password must be at least {_MIN_PASSWORD_LEN} characters.")
     if db.scalar(select(User).where(User.username == username)):
-        raise IdentityError("That username is already taken.")
+        raise IdentityError(
+            "That username is already taken — switch to the Sign in tab "
+            "and use your password."
+        )
     if email and db.scalar(select(User).where(User.email == email)):
         raise IdentityError("That email is already registered.")
     try:
