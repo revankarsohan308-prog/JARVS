@@ -12,7 +12,7 @@ plus the baseline security layer from the specification.
 
 | Area | Status |
 | --- | --- |
-| Auth: register / login / logout / sessions | ✅ real, PBKDF2-hashed passwords, 256-bit tokens (only SHA-256 digests stored) |
+| Auth: register / login / logout / sessions | ✅ real, PBKDF2-hashed passwords, 256-bit tokens (only SHA-256 digests stored); username may be your email |
 | Social sign-in (Google, LinkedIn) | ✅ real OAuth 2.0 + PKCE; unconfigured providers say "Integration not configured." with the exact setup steps |
 | RBAC: 7 roles, permission matrix, denial evidence | ✅ least-privilege, denials audited, 5 denials/5 min → scored threat event |
 | Chat + rule-engine brain | ✅ wake-word stripping, greetings, help, time/status/health, memory & task intents |
@@ -51,7 +51,7 @@ Open <http://127.0.0.1:8760>. The **first account you register becomes the
 SUPER_ADMIN**; every later registration starts as STUDENT.
 
 ```powershell
-# Run the test suite (95 tests) and the linter
+# Run the test suite (98 tests) and the linter
 .\.venv\Scripts\python -m pytest -q
 .\.venv\Scripts\python -m ruff check .
 ```

@@ -43,6 +43,10 @@ class User(Base):
     public_id: Mapped[str] = mapped_column(String(32), unique=True, default=new_id, index=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    # True only when a provider (or a future local verification flow) proved
+    # ownership of the email. OAuth account-linking trusts this flag and this
+    # flag only — an unverified claim can never receive someone else's login.
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(32), default="STUDENT", index=True)
     display_name: Mapped[str] = mapped_column(String(128), default="")

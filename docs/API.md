@@ -11,7 +11,7 @@ Status codes: `401` missing/invalid token · `403` RBAC denial (audited) ·
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| POST | `/register` | `{username, password, email?, display_name?}` → 201. **First account = SUPER_ADMIN** (`bootstrap_admin: true`); later accounts forced to STUDENT. Open registration can be closed with `ALYO_ALLOW_OPEN_REGISTRATION=false`. |
+| POST | `/register` | `{username, password, email?, display_name?}` → 201. Username may be a plain name or **an email address** (normalised to lowercase). **First account = SUPER_ADMIN** (`bootstrap_admin: true`); later accounts forced to STUDENT. Open registration can be closed with `ALYO_ALLOW_OPEN_REGISTRATION=false`. |
 | POST | `/login` | → `{token, expires_at, user}`. Rate-limited; failures feed the brute-force detector. |
 | POST | `/logout` | Revokes the presented token. |
 | GET | `/me` | Current identity incl. privacy toggles. |
@@ -31,7 +31,7 @@ HttpOnly SameSite cookie). Unconfigured providers report
 | --- | --- | --- |
 | GET | `/providers` | Public. Per provider: `configured`, `redirect_uri`, `scopes`, and `note` (setup instructions when not configured). Never exposes client ids/secrets. |
 | GET | `/{provider}/start` | 302 → provider consent screen. Requires configured credentials (else 400 with setup instructions). Rate-limited 20/5 min per host. |
-| GET | `/{provider}/callback` | Validates `state` (400 + scored `oauth_state_mismatch` threat event on mismatch; 429 after 5 failures/5 min), exchanges the code, resolves the account (known subject → login; verified email → link; else auto-provision as STUDENT unless the DB is empty → bootstrap SUPER_ADMIN), issues a session and redirects to `/#alyo_token=…` (fragment — never in server logs). Provider cancellation or refusal → `/?oauth_error=…` + audit, no session. |
+| GET | `/{provider}/callback` | Validates `state` (400 + scored `oauth_state_mismatch` threat event on mismatch; 429 after 5 failures/5 min), exchanges the code, resolves the account (known subject → login; **provider-proven** email → link; else auto-provision as STUDENT unless the DB is empty → bootstrap SUPER_ADMIN), issues a session and redirects to `/#alyo_token=…` (fragment — never in server logs). Provider cancellation or refusal → `/?oauth_error=…` + audit, no session. |
 
 ## Brain — `/brain`
 

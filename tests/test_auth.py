@@ -40,6 +40,28 @@ def test_register_rejects_bad_username(client):
         json={"username": "bad user!!", "password": "valid-pass-1"},
     )
     assert resp.status_code == 400
+    assert "email address" in resp.json()["detail"]  # actionable message
+
+
+def test_email_address_works_as_username(client):
+    """People type their email — that must register and sign in."""
+    data = register(client, "Revankar@Example.com", password="valid-pass-1")
+    assert data["user"]["username"] == "revankar@example.com"  # normalised
+    assert data["bootstrap_admin"] is True  # channel-agnostic bootstrap rule
+
+    # Login is case-insensitive for email usernames (same normalisation).
+    out = login(client, "REVANKAR@example.com", password="valid-pass-1")
+    assert out["token"]
+
+
+def test_email_username_duplicate_is_rejected(client):
+    register(client, "same.one@example.com", password="valid-pass-1")
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={"username": "SAME.ONE@example.com", "password": "another-pass1"},
+    )
+    assert resp.status_code == 400
+    assert "taken" in resp.json()["detail"]
 
 
 def test_login_success_returns_token_and_me(client):

@@ -44,6 +44,28 @@ def get_db() -> Iterator[Session]:
         db.close()
 
 
+# create_all() only creates missing *tables* — it never alters existing ones.
+# Additive column additions for databases created by an earlier version.
+# Each entry: (table, column, column DDL). Idempotent, safe on every boot.
+_ADDITIVE_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("users", "email_verified", "BOOLEAN NOT NULL DEFAULT 0"),
+)
+
+
+def _apply_additive_migrations() -> None:
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    known = {
+        table: {col["name"] for col in inspector.get_columns(table)}
+        for table, _, _ in _ADDITIVE_MIGRATIONS
+    }
+    with engine.begin() as conn:
+        for table, column, ddl in _ADDITIVE_MIGRATIONS:
+            if column not in known[table]:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+
+
 def init_db() -> None:
     """Create tables if they do not exist. Import models for their side effects."""
     from database import models  # noqa: F401
@@ -52,3 +74,4 @@ def init_db() -> None:
     settings.tmp_dir.mkdir(parents=True, exist_ok=True)
     settings.logs_dir.mkdir(parents=True, exist_ok=True)
     models.Base.metadata.create_all(bind=engine)
+    _apply_additive_migrations()

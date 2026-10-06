@@ -89,8 +89,8 @@ function setAuthMode(mode) {
   $("tab-register").classList.toggle("active", mode === "register");
   $("auth-submit").textContent = mode === "login" ? "Sign in" : "Create account";
   $("auth-hint").textContent = mode === "login"
-    ? "The first account created becomes the administrator."
-    : "Password: at least 8 characters. Later accounts start as STUDENT.";
+    ? "Username or email — the first account created becomes the administrator."
+    : "Username or your email. Password: at least 8 characters. Later accounts start as STUDENT.";
   $("auth-error").classList.add("hidden");
 }
 

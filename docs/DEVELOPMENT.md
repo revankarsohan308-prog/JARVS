@@ -3,7 +3,7 @@
 ## Commands
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q          # test suite (95 tests)
+.\.venv\Scripts\python -m pytest -q          # test suite (98 tests)
 .\.venv\Scripts\python -m pytest tests/test_brain.py -q
 .\.venv\Scripts\python -m ruff check .       # lint (clean baseline)
 .\.venv\Scripts\python -m ruff check . --fix # auto-fix
@@ -77,6 +77,13 @@ OAuth providers live in one registry — `core/identity/oauth.py::PROVIDERS`:
 3. No route changes needed — `/{provider}/start` and `/callback` are generic.
 4. Test with `tests/test_oauth.py` as the template (stub `_post_json` /
    `_get_json`; never hit the real network in tests).
+
+## Schema changes
+
+`create_all()` only creates missing *tables*; it never alters existing ones.
+New **columns** go into `database/session.py::_ADDITIVE_MIGRATIONS` (idempotent,
+applied on every boot). Structural changes and a full migration framework are
+Milestone 2 scope — see docs/ROADMAP.md.
 
 ## Code style notes
 

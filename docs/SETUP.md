@@ -67,7 +67,7 @@ First run creates `data/alyo.db` and seeds nothing —
 ## Verify the installation
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q   # expect: 95 passed
+.\.venv\Scripts\python -m pytest -q   # expect: 98 passed
 .\.venv\Scripts\python -m ruff check . # expect: All checks passed!
 Invoke-RestMethod http://127.0.0.1:8760/api/v1/system/health
 ```

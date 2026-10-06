@@ -26,6 +26,8 @@ from security.audit import audit
 from timeutil import utcnow, utcnow_plus
 
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
+# People naturally type their email — accept that as a username too.
+_EMAIL_USERNAME_RE = re.compile(r"^[^@\s]{1,61}@[^@\s]{1,61}\.[A-Za-z]{2,}$")
 _MIN_PASSWORD_LEN = 8
 
 # A dummy hash used when the username does not exist, so login timing does not
@@ -68,8 +70,13 @@ def register_user(
     actor: str = "system",
 ) -> User:
     username = (username or "").strip()
-    if not _USERNAME_RE.match(username):
-        raise IdentityError("Username must be 3-64 characters: letters, digits, dot, dash, underscore.")
+    if _EMAIL_USERNAME_RE.match(username):
+        username = username.lower()  # email addresses are case-insensitive
+    elif not _USERNAME_RE.match(username):
+        raise IdentityError(
+            "Username must be 3-64 characters: letters, digits, dot, dash, "
+            "underscore — or an email address like you@example.com."
+        )
     if len(password or "") < _MIN_PASSWORD_LEN:
         raise IdentityError(f"Password must be at least {_MIN_PASSWORD_LEN} characters.")
     if db.scalar(select(User).where(User.username == username)):
@@ -100,7 +107,10 @@ def authenticate(db: Session, username: str, password: str) -> User:
     Failures are audited here and counted by the threat detector at the API
     layer, where client context (IP, request id) is available.
     """
-    user = db.scalar(select(User).where(User.username == (username or "").strip()))
+    username = (username or "").strip()
+    if _EMAIL_USERNAME_RE.match(username):
+        username = username.lower()  # same normalisation as registration
+    user = db.scalar(select(User).where(User.username == username))
     stored = user.password_hash if user else _DUMMY_HASH
     if not verify_password(password or "", stored) or user is None:
         audit(

@@ -293,31 +293,40 @@ def resolve_account(db, provider: Provider, userinfo: dict) -> tuple[User, str]:
             raise OAuthError("This account is deactivated. Contact an administrator.")
         return user, "existing"
 
-    # 2) Verified email matching an existing account → link (never for
-    #    unverified emails: that would allow account takeover).
+    # 2) Verified email matching an existing account → link, but only if that
+    #    account's email was itself proven by a provider. A password account
+    #    merely *claims* the address (no local verification exists yet);
+    #    handing it a provider login would enable pre-registered takeover.
+    provision_email: str | None = None
     if email and email_verified:
         existing = db.scalar(select(User).where(User.email == email))
         if existing is not None:
             if not existing.is_active:
                 raise OAuthError("This account is deactivated. Contact an administrator.")
-            db.add(
-                OAuthIdentity(
-                    user_id=existing.id,
-                    provider=provider.id,
-                    subject=subject,
-                    email=email,
-                    email_verified=True,
+            if existing.email_verified:
+                db.add(
+                    OAuthIdentity(
+                        user_id=existing.id,
+                        provider=provider.id,
+                        subject=subject,
+                        email=email,
+                        email_verified=True,
+                    )
                 )
-            )
-            db.commit()
-            audit(
-                db,
-                "oauth_identity_linked",
-                f"provider={provider.id} user={existing.username} email={email}",
-                actor=f"user:{existing.username}",
-                component="identity",
-            )
-            return existing, "linked"
+                db.commit()
+                audit(
+                    db,
+                    "oauth_identity_linked",
+                    f"provider={provider.id} user={existing.username} email={email}",
+                    actor=f"user:{existing.username}",
+                    component="identity",
+                )
+                return existing, "linked"
+            # Unverified local claim: leave it alone and open a separate,
+            # provider-verified account for the real owner of the address.
+            provision_email = None
+        else:
+            provision_email = email
 
     # 3) New account — only if auto-provisioning is enabled.
     if not settings.oauth_auto_provision:
@@ -348,15 +357,17 @@ def resolve_account(db, provider: Provider, userinfo: dict) -> tuple[User, str]:
             username,
             secrets.token_urlsafe(32),  # unusable: social accounts cannot password-login
             role=role,
-            # Never put an unverified provider claim in the unique email column;
-            # the raw value stays on the identity row with its verified flag.
-            email=email if (email_verified and email) else None,
+            # Only a provider-proven, unclaimed address enters the unique email
+            # column; the raw claim stays on the identity row either way.
+            email=provision_email,
             display_name=display_name or username,
             actor=f"oauth:{provider.id}",
         )
     except IdentityError as exc:
         raise OAuthError(f"Could not create a local account: {exc}") from exc
 
+    if provision_email:
+        user.email_verified = True
     db.add(
         OAuthIdentity(
             user_id=user.id,

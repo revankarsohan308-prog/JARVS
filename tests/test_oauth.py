@@ -192,6 +192,7 @@ def test_first_social_login_bootstraps_admin_and_token_works(client, db, google_
     user = db.scalar(select(User))
     assert user is not None and user.username == "first.person"
     assert user.role == "SUPER_ADMIN"  # bootstrap rule is channel-agnostic
+    assert user.email_verified is True  # provider proved the address
     identity_row = db.scalar(select(OAuthIdentity))
     assert identity_row is not None
     assert (identity_row.provider, identity_row.subject) == ("google", "g-123")
@@ -224,7 +225,12 @@ def test_same_subject_logs_into_the_same_account(client, db, google_configured, 
     )[1]  # fresh session token each time
 
 
-def test_verified_email_links_to_existing_password_account(client, db, google_configured, monkeypatch):
+def test_password_account_cannot_receive_a_provider_login(client, db, google_configured, monkeypatch):
+    """A password account merely *claims* its email — never enough to link.
+
+    Pre-registering someone else's address must not let a later provider
+    sign-in land in that account (account-takeover defence).
+    """
     register(client, "alice", email="alice@example.com")
     stub_provider(monkeypatch, {"sub": "g-777", "email": "alice@example.com", "email_verified": True, "name": "Alice"})
     resp = finish_flow(client, start_flow(client))
@@ -233,11 +239,37 @@ def test_verified_email_links_to_existing_password_account(client, db, google_co
     from database.models import AuditLog, OAuthIdentity, User
 
     users = db.scalars(select(User)).all()
-    assert len(users) == 1  # linked, not duplicated
-    assert users[0].username == "alice"
-    link = db.scalar(select(OAuthIdentity))
-    assert link is not None and link.user_id == users[0].id and link.email_verified is True
-    assert "oauth_identity_linked" in list(db.scalars(select(AuditLog.event)))
+    assert len(users) == 2  # separate account for the provider-proven owner
+    squatter = next(u for u in users if u.username == "alice")
+    assert squatter.email_verified is False
+    owner = next(u for u in users if u.username != "alice")
+    assert owner.email is None  # unique column already holds the squatter's claim
+    assert owner.email_verified is False
+    assert "oauth_identity_linked" not in list(db.scalars(select(AuditLog.event)))
+    links = db.scalars(select(OAuthIdentity)).all()
+    assert len(links) == 1 and links[0].user_id == owner.id
+
+
+def test_verified_email_links_between_providers(client, db, google_configured, monkeypatch):
+    """An account proven by one provider links to another verified login."""
+    stub_provider(monkeypatch, {"sub": "g-100", "email": "dev@example.com", "email_verified": True})
+    assert finish_flow(client, start_flow(client)).status_code == 302  # creates google identity
+
+    from config.settings import settings
+
+    monkeypatch.setattr(settings, "linkedin_client_id", "li-id")
+    monkeypatch.setattr(settings, "linkedin_client_secret", "li-secret")
+    stub_provider(monkeypatch, {"sub": "li-200", "email": "dev@example.com", "email_verified": True})
+    resp = finish_flow(client, start_flow(client, "linkedin"), provider="linkedin")
+    assert resp.status_code == 302
+
+    from database.models import OAuthIdentity, User
+
+    users = db.scalars(select(User)).all()
+    assert len(users) == 1  # same account, two providers
+    links = db.scalars(select(OAuthIdentity)).all()
+    assert {(r.provider, r.subject) for r in links} == {("google", "g-100"), ("linkedin", "li-200")}
+    assert len({r.user_id for r in links}) == 1
 
 
 def test_unverified_email_never_links_to_existing_account(client, db, google_configured, monkeypatch):

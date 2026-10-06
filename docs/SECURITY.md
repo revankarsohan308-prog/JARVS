@@ -66,12 +66,16 @@ non-alarmist — ALYO never claims "you are being hacked".
 - Callback `state` failures are audited (`oauth_callback_failed`) and scored:
   a `oauth_state_mismatch` threat event (35–75, rising with repeats); the 6th
   failure in 5 minutes is rate-limited (429).
-- Account mapping order: known provider subject → login; **verified** email
-  matching an existing account → link (audited `oauth_identity_linked`);
-  otherwise auto-provision (`ALYO_OAUTH_AUTO_PROVISION`, default on) as
+- Account mapping order: known provider subject → login; **provider-proven**
+  email → link (audited `oauth_identity_linked`). A password account merely
+  *claims* its email (no local verification exists yet), so a provider login
+  never lands in it — pre-registering someone's address cannot capture their
+  sign-in; the real owner gets a separate account instead. Otherwise
+  auto-provision (`ALYO_OAUTH_AUTO_PROVISION`, default on) as
   STUDENT — the first-account bootstrap rule is channel-agnostic.
 - Unverified email claims are never trusted: they cannot link an account and
-  are not written to the unique email column.
+  the unique email column only ever holds a provider-proven address
+  (`User.email_verified`).
 - Social-created accounts get an **unusable random password** (they cannot
   password-login); provider access tokens are used once for userinfo and never
   stored.
