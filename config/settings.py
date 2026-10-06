@@ -38,6 +38,19 @@ class Settings(BaseSettings):
     chat_rate_limit: int = 30
     chat_rate_window: int = 60
 
+    # Social sign-in (OAuth 2.0 / OIDC) ------------------------------------
+    # Empty = provider not configured: the API reports "Integration not
+    # configured." with these exact variable names instead of faking a login.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    linkedin_client_id: str = ""
+    linkedin_client_secret: str = ""
+    # Create an account automatically on first social login (else link-only).
+    oauth_auto_provision: bool = True
+    # Public origin used for the OAuth redirect URI behind a reverse proxy;
+    # empty = derive from the incoming request.
+    public_base_url: str = ""
+
     # Brain -----------------------------------------------------------------
     wake_word: str = "hey jarvis"
     llm_provider: str = "local"  # local | openai

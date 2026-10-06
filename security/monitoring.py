@@ -143,7 +143,7 @@ def record_bug_event(
 # ---------------------------------------------------------------------------
 
 # A finding is only raised when the caller supplies real observed counts.
-_THREAT_PROFILES: dict[str, tuple[str, str, str, str]] = {
+_THREAT_PROFILES: dict[str, tuple[str, str, str]] = {
     "brute_force_login": (
         "Repeated failed logins",
         "Multiple failed login attempts for one account match brute-force-like behaviour.",
@@ -168,6 +168,13 @@ _THREAT_PROFILES: dict[str, tuple[str, str, str, str]] = {
         "Suspicious session activity",
         "Session usage patterns deviate from the recorded baseline for this account.",
         "Review active sessions and revoke any that are unrecognized.",
+    ),
+    "oauth_state_mismatch": (
+        "Failed sign-in callback validation",
+        "An OAuth callback arrived with a missing, expired or mismatched state value; "
+        "possible causes include a CSRF attempt, a replayed sign-in link, or blocked cookies.",
+        "Retry the sign-in from the ALYO page with cookies enabled; if it keeps failing, "
+        "review oauth_callback_failed audit entries and the configured redirect URI.",
     ),
 }
 

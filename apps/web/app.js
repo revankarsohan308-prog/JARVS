@@ -56,6 +56,7 @@ let authMode = "login";
 function showAuth() {
   $("app-view").classList.add("hidden");
   $("auth-view").classList.remove("hidden");
+  loadProviders();
 }
 
 async function showApp() {
@@ -118,6 +119,36 @@ $("logout-btn").addEventListener("click", async () => {
   localStorage.removeItem("alyo_token");
   showAuth();
 });
+
+/* ---------------- social sign-in (OAuth 2.0) ---------------- */
+
+async function loadProviders() {
+  let list = [];
+  try {
+    const data = await api("/auth/oauth/providers");
+    list = data.providers || [];
+  } catch (_) { /* server unreachable — buttons stay hidden */ }
+  document.querySelectorAll(".oauth-btn").forEach((btn) => {
+    const p = list.find((x) => x.id === btn.dataset.provider);
+    if (!p) {
+      btn.classList.add("hidden");
+      return;
+    }
+    btn.disabled = false;
+    btn.classList.toggle("not-configured", !p.configured);
+    btn.title = p.configured ? `Sign in with ${p.display_name}` : p.note;
+    btn.onclick = () => {
+      if (p.configured) {
+        window.location.href = `${API}/auth/oauth/${p.id}/start`;
+        return;
+      }
+      // Honest state: never pretend a provider works.
+      const note = $("oauth-note");
+      note.textContent = p.note;
+      note.classList.remove("hidden");
+    };
+  });
+}
 
 /* ---------------- navigation ---------------- */
 
@@ -518,7 +549,31 @@ $("delete-account-btn").addEventListener("click", async () => {
 
 /* ---------------- boot ---------------- */
 
+function consumeAuthRedirect() {
+  // Token handed back by the OAuth callback. The fragment never reaches the
+  // server, so it stays out of access logs; we clear it from the URL bar.
+  const m = location.hash.match(/alyo_token=([A-Za-z0-9_-]+)/);
+  if (m) {
+    token = m[1];
+    localStorage.setItem("alyo_token", token);
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+  const params = new URLSearchParams(location.search);
+  const oauthError = params.get("oauth_error");
+  if (oauthError) {
+    setTimeout(() => {
+      const box = $("auth-error");
+      box.textContent = oauthError;
+      box.classList.remove("hidden");
+    }, 0);
+    params.delete("oauth_error");
+    const qs = params.toString();
+    history.replaceState(null, "", location.pathname + (qs ? `?${qs}` : ""));
+  }
+}
+
 (async function boot() {
+  consumeAuthRedirect();
   if (token) await showApp();
   else showAuth();
 })();

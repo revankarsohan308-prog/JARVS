@@ -68,6 +68,26 @@ class SessionToken(Base):
     client_label: Mapped[str] = mapped_column(String(128), default="")
 
 
+class OAuthIdentity(Base):
+    """A linked social sign-in (Google, LinkedIn, ...).
+
+    Links an external provider subject to a local account. Only the subject id
+    and the provider-asserted email are stored — no provider tokens are kept
+    after the login exchange.
+    """
+
+    __tablename__ = "oauth_identities"
+    __table_args__ = (UniqueConstraint("provider", "subject", name="uq_oauth_provider_subject"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    subject: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(String(255), default="")
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class ConversationTurn(Base):
     """Short-term memory: the running conversation, per user."""
 

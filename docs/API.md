@@ -21,6 +21,18 @@ Status codes: `401` missing/invalid token · `403` RBAC denial (audited) ·
 | GET | `/roles` | Role → permission matrix (transparency). |
 | POST | `/users/{id}/role` | Requires `USER_MANAGE`. Audited `role_changed`. |
 
+### Social sign-in — `/auth/oauth`
+
+Real OAuth 2.0 authorization-code flow with PKCE (CSRF `state` bound to an
+HttpOnly SameSite cookie). Unconfigured providers report
+*"Integration not configured."* + the exact `.env` variables — never a fake button.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/providers` | Public. Per provider: `configured`, `redirect_uri`, `scopes`, and `note` (setup instructions when not configured). Never exposes client ids/secrets. |
+| GET | `/{provider}/start` | 302 → provider consent screen. Requires configured credentials (else 400 with setup instructions). Rate-limited 20/5 min per host. |
+| GET | `/{provider}/callback` | Validates `state` (400 + scored `oauth_state_mismatch` threat event on mismatch; 429 after 5 failures/5 min), exchanges the code, resolves the account (known subject → login; verified email → link; else auto-provision as STUDENT unless the DB is empty → bootstrap SUPER_ADMIN), issues a session and redirects to `/#alyo_token=…` (fragment — never in server logs). Provider cancellation or refusal → `/?oauth_error=…` + audit, no session. |
+
 ## Brain — `/brain`
 
 | Method | Path | Notes |

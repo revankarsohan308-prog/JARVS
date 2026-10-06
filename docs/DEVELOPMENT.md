@@ -3,7 +3,7 @@
 ## Commands
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q          # test suite (78 tests)
+.\.venv\Scripts\python -m pytest -q          # test suite (94 tests)
 .\.venv\Scripts\python -m pytest tests/test_brain.py -q
 .\.venv\Scripts\python -m ruff check .       # lint (clean baseline)
 .\.venv\Scripts\python -m ruff check . --fix # auto-fix
@@ -64,6 +64,19 @@ Test rules:
 4. Test authorized path, 401 without token, 403 without permission, isolation
    from other users' rows.
 5. Document the endpoint in `docs/API.md`.
+
+## Adding a provider (social sign-in)
+
+OAuth providers live in one registry — `core/identity/oauth.py::PROVIDERS`:
+
+1. Add a `Provider(...)` entry: display name, authorization/token/userinfo
+   endpoints, scopes, and the env var names for its client id/secret
+   (add those two fields to `config/settings.py` and `.env.example`).
+2. Add a button with `data-provider="<id>"` in `apps/web/index.html` (the UI
+   picks it up automatically from `GET /auth/oauth/providers`).
+3. No route changes needed — `/{provider}/start` and `/callback` are generic.
+4. Test with `tests/test_oauth.py` as the template (stub `_post_json` /
+   `_get_json`; never hit the real network in tests).
 
 ## Code style notes
 

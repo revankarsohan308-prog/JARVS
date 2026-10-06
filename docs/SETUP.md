@@ -31,6 +31,24 @@ Everything works with defaults. Values you may want to change:
 | `ALYO_EMERGENCY_REGION` / `ALYO_EMERGENCY_NUMBER` | Emergency display info (default India / 112) |
 | `ALYO_DATABASE_URL` | Absolute path or another SQLAlchemy URL if you outgrow SQLite |
 
+## Social sign-in (Google / LinkedIn) — optional
+
+Social login is a real OAuth 2.0 flow; it works only after you register OAuth
+clients with the providers (ALYO never ships shared credentials):
+
+1. **Google** — [Google Cloud Console → Credentials → Create OAuth client (Web)](https://console.cloud.google.com/apis/credentials).
+   Authorized redirect URI: `http://127.0.0.1:8760/api/v1/auth/oauth/google/callback`
+2. **LinkedIn** — [LinkedIn Developer Portal → Create app](https://developer.linkedin.com/) →
+   add the *Sign In with LinkedIn using OpenID Connect* product. Redirect URI:
+   `http://127.0.0.1:8760/api/v1/auth/oauth/linkedin/callback`
+
+Put the client id/secret in `.env` (see `.env.example`) and restart. Until then
+the sign-in page marks the buttons **not configured** and clicking one shows the
+exact variables required — it never pretends to work.
+
+Behind a reverse proxy set `ALYO_PUBLIC_BASE_URL=https://your-domain` so the
+redirect URI matches what you registered with the provider.
+
 ## Run
 
 ```powershell
@@ -44,7 +62,7 @@ First run creates `data/alyo.db` and seeds nothing —
 ## Verify the installation
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q   # expect: 78 passed
+.\.venv\Scripts\python -m pytest -q   # expect: 94 passed
 .\.venv\Scripts\python -m ruff check . # expect: All checks passed!
 Invoke-RestMethod http://127.0.0.1:8760/api/v1/system/health
 ```
