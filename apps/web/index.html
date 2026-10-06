@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ALYO</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Authentication -->
+  <div id="auth-view" class="auth-wrap hidden">
+    <div class="auth-card">
+      <div class="brand">
+        <span class="brand-mark">A</span>
+        <div>
+          <h1>ALYO</h1>
+          <p class="muted">Your personal assistant — real actions only.</p>
+        </div>
+      </div>
+      <div class="tabs">
+        <button id="tab-login" class="tab active">Sign in</button>
+        <button id="tab-register" class="tab">Create account</button>
+      </div>
+      <form id="auth-form">
+        <label>Username
+          <input id="auth-username" autocomplete="username" required minlength="3" maxlength="64" />
+        </label>
+        <label>Password
+          <input id="auth-password" type="password" autocomplete="current-password" required minlength="8" />
+        </label>
+        <p id="auth-hint" class="hint">The first account created becomes the administrator.</p>
+        <p id="auth-error" class="error hidden"></p>
+        <button type="submit" class="primary" id="auth-submit">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main app -->
+  <div id="app-view" class="hidden">
+    <header class="topbar">
+      <div class="brand small">
+        <span class="brand-mark">A</span>
+        <strong>ALYO</strong>
+        <span id="conn-badge" class="badge">offline</span>
+      </div>
+      <nav id="nav">
+        <button data-panel="chat" class="nav-btn active">Chat</button>
+        <button data-panel="tasks" class="nav-btn">Tasks</button>
+        <button data-panel="memory" class="nav-btn">Memory</button>
+        <button data-panel="system" class="nav-btn">System</button>
+        <button data-panel="security" class="nav-btn">Security</button>
+        <button data-panel="privacy" class="nav-btn">Privacy</button>
+      </nav>
+      <div class="user-box">
+        <span id="user-name" class="muted"></span>
+        <span id="user-role" class="badge role"></span>
+        <button id="logout-btn" class="ghost">Sign out</button>
+      </div>
+    </header>
+
+    <main>
+      <!-- Chat -->
+      <section id="panel-chat" class="panel active">
+        <div id="chat-log" class="chat-log"></div>
+        <div id="confirm-bar" class="confirm-bar hidden">
+          <span id="confirm-text"></span>
+          <button id="confirm-approve" class="primary">Approve</button>
+          <button id="confirm-deny" class="ghost">Deny</button>
+        </div>
+        <form id="chat-form" class="chat-form">
+          <input id="chat-input" placeholder="Message ALYO — try “system status” or “remind me to call mom on 2026-10-14”" autocomplete="off" maxlength="4000" />
+          <button type="submit" class="primary">Send</button>
+        </form>
+      </section>
+
+      <!-- Tasks -->
+      <section id="panel-tasks" class="panel">
+        <form id="task-form" class="inline-form">
+          <input id="task-title" placeholder="New task title" required maxlength="300" />
+          <select id="task-priority">
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
+            <option value="low">Low</option>
+          </select>
+          <input id="task-due" type="date" />
+          <button type="submit" class="primary">Add task</button>
+        </form>
+        <label class="row-check"><input type="checkbox" id="task-show-done" /> Show completed</label>
+        <div id="task-list" class="list"></div>
+      </section>
+
+      <!-- Memory -->
+      <section id="panel-memory" class="panel">
+        <form id="memory-form" class="inline-form">
+          <input id="memory-key" placeholder="Key (e.g. course)" required maxlength="120" />
+          <input id="memory-content" placeholder="What should ALYO remember?" required maxlength="4000" />
+          <button type="submit" class="primary">Remember</button>
+        </form>
+        <form id="memory-search" class="inline-form">
+          <input id="memory-query" placeholder="Search memory…" maxlength="200" />
+          <button type="submit" class="ghost">Search</button>
+        </form>
+        <div id="memory-list" class="list"></div>
+      </section>
+
+      <!-- System -->
+      <section id="panel-system" class="panel">
+        <div class="cards" id="system-cards"></div>
+        <div id="system-alerts" class="alerts"></div>
+        <button id="system-refresh" class="ghost">Refresh</button>
+      </section>
+
+      <!-- Security -->
+      <section id="panel-security" class="panel">
+        <div class="cards" id="security-cards"></div>
+        <h3>Events</h3>
+        <div id="event-list" class="list"></div>
+        <h3>Incidents</h3>
+        <div id="incident-list" class="list"></div>
+      </section>
+
+      <!-- Privacy -->
+      <section id="panel-privacy" class="panel">
+        <div class="toggles">
+          <label class="row-check">
+            <input type="checkbox" id="toggle-history" /> Keep conversation history
+          </label>
+          <label class="row-check">
+            <input type="checkbox" id="toggle-memory" /> Allow long-term memory
+          </label>
+        </div>
+        <h3>Your data</h3>
+        <div id="privacy-data" class="list"></div>
+        <h3>Retention policy</h3>
+        <div id="retention-table" class="list"></div>
+        <div class="actions">
+          <button id="export-btn" class="ghost">Download my data (JSON)</button>
+          <button id="clear-history-btn" class="ghost">Delete conversation history</button>
+          <button id="delete-account-btn" class="danger">Delete my account…</button>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
