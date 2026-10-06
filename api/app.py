@@ -21,6 +21,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+
+class NoCacheStaticFiles(StaticFiles):
+    """Static files that always revalidate (no-cache → ETag still applies).
+
+    Without this, browsers heuristically cache app.js/index.html and users
+    keep running yesterday's UI after an update — which, from the user's side,
+    looks exactly like "still not working".
+    """
+
+    def file_response(self, *args, **kwargs):  # pragma: no cover - thin override
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
 from config.settings import PROJECT_ROOT, settings
 from core.agent.registry import registry
 from core.brain import orchestrator
@@ -176,7 +190,7 @@ def create_app() -> FastAPI:
     # Web interface (served only if present).
     web_dir = PROJECT_ROOT / "apps" / "web"
     if web_dir.is_dir():
-        app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web")
+        app.mount("/", NoCacheStaticFiles(directory=str(web_dir), html=True), name="web")
 
     return app
 
