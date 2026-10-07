@@ -26,8 +26,9 @@ Everything works with defaults. Values you may want to change:
 
 | `.env` key | Why |
 | --- | --- |
+| `ALYO_APP_HOST=0.0.0.0` | **Reach ALYO from your phone/other devices on the same Wi-Fi.** Open `http://<YOUR-LAN-IP>:8760` (find the IP with `ipconfig`). Windows Firewall must allow inbound TCP 8760. |
+| `ALYO_LLM_PROVIDER=openai` + `ALYO_OPENAI_API_KEY` | Enables **real AI replies**. Get a key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) (billing must be enabled). Until the key is set, ALYO honestly answers with its local rule engine and shows "AI: local rules". |
 | `ALYO_APP_SECRET_KEY` | Set to a random 32+ char string before any real deployment |
-| `ALYO_OPENAI_API_KEY` | Enables real LLM replies (`ALYO_LLM_PROVIDER=openai`) |
 | `ALYO_EMERGENCY_REGION` / `ALYO_EMERGENCY_NUMBER` | Emergency display info (default India / 112) |
 | `ALYO_DATABASE_URL` | Absolute path or another SQLAlchemy URL if you outgrow SQLite |
 
@@ -46,6 +47,9 @@ Put the client id/secret in `.env` (see `.env.example`) and restart. Until then
 the sign-in page marks the buttons **not configured** and clicking one shows the
 exact variables required — it never pretends to work.
 
+The exact redirect URI ALYO is expecting is always visible without secrets at
+`GET /api/v1/system/diagnostics`.
+
 Behind a reverse proxy set `ALYO_PUBLIC_BASE_URL=https://your-domain` so the
 redirect URI matches what you registered with the provider.
 
@@ -61,15 +65,24 @@ or an internal verification server — without touching code.
 # → ALYO on http://127.0.0.1:8760  (UI at /, API docs at /docs)
 ```
 
+Or use the helper (stops any stale listener on the port first, then starts):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start-alyo.bat
+```
+
 First run creates `data/alyo.db` and seeds nothing —
 **register the first account to become SUPER_ADMIN**.
 
 ## Verify the installation
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q   # expect: 98 passed
+.\.venv\Scripts\python -m pytest -q   # expect: 108 passed
 .\.venv\Scripts\python -m ruff check . # expect: All checks passed!
 Invoke-RestMethod http://127.0.0.1:8760/api/v1/system/health
+Invoke-RestMethod http://127.0.0.1:8760/api/v1/system/diagnostics
 ```
 
-`checks.database.status` must be `ONLINE`.
+`checks.database.status` must be `ONLINE`. The diagnostics endpoint reports
+whether Google/LinkedIn sign-in and the AI provider are configured — without
+exposing any secrets.

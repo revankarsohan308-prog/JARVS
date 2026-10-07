@@ -5,14 +5,82 @@ from __future__ import annotations
 import platform
 
 import psutil
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from sqlalchemy import text
 
 from api.deps import CurrentUser, DbDep
 from config.settings import settings
 from core.brain.providers import provider_status
+from core.identity import oauth
 
 router = APIRouter(prefix="/system", tags=["system"])
+
+
+@router.get("/diagnostics")
+def diagnostics(request: Request, db: DbDep):
+    """Deployment configuration status — no secrets are ever returned.
+
+    Reports CONFIGURED / MISSING per integration plus the exact redirect URI
+    that must be registered, so operators can fix a failing sign-in without
+    ever seeing a client secret or API key.
+    """
+    database_ok = False
+    try:
+        db.execute(text("SELECT 1"))
+        database_ok = True
+    except Exception:
+        database_ok = False
+
+    base = (
+        settings.public_base_url.rstrip("/")
+        if settings.public_base_url
+        else str(request.base_url).rstrip("/")
+    )
+    provider_rows = []
+    for provider in oauth.PROVIDERS.values():
+        configured = oauth.is_configured(provider)
+        provider_rows.append(
+            {
+                "id": provider.id,
+                "display_name": provider.display_name,
+                "status": "CONFIGURED" if configured else "MISSING",
+                "required_env_vars": [provider.client_id_setting, provider.client_secret_setting],
+                "redirect_uri": f"{base}/api/v1/auth/oauth/{provider.id}/callback",
+            }
+        )
+
+    ai = provider_status()
+    ai_available = bool(ai.get("available"))
+    ai_vars = []
+    if not ai_available or ai.get("mode") == "local-rules":
+        ai_vars = ["ALYO_LLM_PROVIDER", "ALYO_OPENAI_API_KEY"]
+    return {
+        "backend": {"status": "ONLINE", "version": settings.app_version},
+        "database": {"status": "CONNECTED" if database_ok else "FAILED"},
+        "session": {
+            "status": "CONFIGURED",
+            "ttl_minutes": settings.session_ttl_minutes,
+            "cookie": "alyo_session (HttpOnly, SameSite=Lax)",
+        },
+        "social_signin": provider_rows,
+        "ai": {
+            "provider": ai.get("provider"),
+            "status": "CONFIGURED" if ai_available else "MISSING",
+            "mode": ai.get("mode"),
+            "model": ai.get("model"),
+            "required_env_vars": ai_vars,
+            "note": (
+                "Local rule brain is running and answers with verified rules, "
+                "not fake AI. Set ALYO_LLM_PROVIDER=openai plus ALYO_OPENAI_API_KEY "
+                "to enable cloud AI."
+                if not ai_available or ai.get("mode") == "local-rules"
+                else "Cloud AI is configured and ready."
+            ),
+        },
+        "notes": [
+            "No passwords, tokens, secrets or API keys are included in this report.",
+        ],
+    }
 
 
 @router.get("/health")

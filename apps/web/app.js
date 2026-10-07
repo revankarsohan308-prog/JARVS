@@ -2,7 +2,10 @@
 "use strict";
 
 const API = "/api/v1";
-let token = localStorage.getItem("alyo_token") || null;
+// Sessions ride an HttpOnly, SameSite=Lax cookie set by the server. A token is
+// kept in memory only for the current page (single-page hand-off, OAuth
+// fragment, device flows). It is never written to localStorage.
+let token = null;
 let me = null;
 let pendingConfirmation = null;
 
@@ -53,10 +56,30 @@ function fmtDate(iso) {
 
 let authMode = "login";
 
+async function renderAuthStatus() {
+  const el = $("auth-status");
+  if (!el) return;
+  let html = '<span class="muted">Checking backend…</span>';
+  try {
+    const health = await api("/system/health", { headers: {} });
+    const db = health.checks?.database?.status === "ONLINE";
+    const ai = health.checks?.ai_provider;
+    const aiMode = ai?.mode || "local-rules";
+    const aiReady = aiMode !== "local-rules";
+    const dbLabel = db ? '<span class="ok-dot"></span> Database connected' : '<span class="bad-dot"></span> Database offline';
+    const aiLabel = aiReady
+      ? '<span class="ok-dot"></span> AI online' + (ai?.model ? ` (${esc(ai.model)})` : "")
+      : '<span class="warn-dot"></span> AI: local rules — add an OpenAI key for real answers';
+    html = `${dbLabel} · ${aiLabel}`;
+  } catch (_) { html = '<span class="bad-dot"></span> Backend unreachable'; }
+  el.innerHTML = html;
+}
+
 function showAuth() {
   $("app-view").classList.add("hidden");
   $("auth-view").classList.remove("hidden");
   loadProviders();
+  renderAuthStatus();
 }
 
 async function showApp() {
@@ -66,16 +89,16 @@ async function showApp() {
     $("app-view").classList.remove("hidden");
     $("user-name").textContent = me.user.username;
     $("user-role").textContent = me.user.role;
-    $("conn-badge").textContent = "online";
-    $("conn-badge").classList.add("online");
+    setConn("connecting");
+    startHeartbeat();
     loadTasks();
     loadMemory();
     loadSystem();
     loadSecurity();
     loadPrivacy();
+    updateAiChip();
   } catch (err) {
     token = null;
-    localStorage.removeItem("alyo_token");
     showAuth();
   }
 }
@@ -104,7 +127,6 @@ $("auth-form").addEventListener("submit", async (e) => {
       body: JSON.stringify({ username, password }),
     });
     token = data.token;
-    localStorage.setItem("alyo_token", token);
     await showApp();
   } catch (err) {
     const box = $("auth-error");
@@ -116,9 +138,39 @@ $("auth-form").addEventListener("submit", async (e) => {
 $("logout-btn").addEventListener("click", async () => {
   try { await api("/auth/logout", { method: "POST" }); } catch (_) { /* already gone */ }
   token = null;
-  localStorage.removeItem("alyo_token");
+  stopHeartbeat();
+  setConn("offline");
   showAuth();
 });
+
+/* ---------------- connection status (real heartbeat) ---------------- */
+
+let heartbeatTimer = null;
+
+function setConn(state) {
+  const badge = $("conn-badge");
+  badge.textContent = state;
+  badge.className = "badge " + state;
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  const ping = async () => {
+    try {
+      const health = await api("/system/health", { headers: {} });
+      if (health && health.status === "ONLINE") setConn("online");
+      else setConn("degraded");
+    } catch (_) {
+      setConn("offline");
+    }
+  };
+  ping();
+  heartbeatTimer = setInterval(ping, 15000);
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+}
 
 /* ---------------- social sign-in (OAuth 2.0) ---------------- */
 
@@ -376,8 +428,35 @@ async function loadSystem() {
     $("system-alerts").innerHTML = (metrics.alerts || [])
       .map((a) => `<div class="list-item">${esc(a)}</div>`)
       .join("");
+    updateAiChipFromHealth(health);
   } catch (err) {
     toast(`System: ${err.message}`, true);
+  }
+}
+
+async function updateAiChip() {
+  const chip = $("ai-chip");
+  if (!chip) return;
+  try {
+    const health = await api("/system/health");
+    updateAiChipFromHealth(health);
+  } catch (_) {
+    chip.textContent = "AI: offline";
+    chip.className = "badge ai offline";
+  }
+}
+
+function updateAiChipFromHealth(health) {
+  const chip = $("ai-chip");
+  if (!chip) return;
+  const ai = health?.checks?.ai_provider;
+  if (!ai) { chip.textContent = "AI: unknown"; chip.className = "badge ai"; return; }
+  if (ai.mode === "cloud") {
+    chip.textContent = `AI: ${ai.model || "online"}`;
+    chip.className = "badge ai online";
+  } else {
+    chip.textContent = "AI: local rules";
+    chip.className = "badge ai local";
   }
 }
 $("system-refresh").addEventListener("click", loadSystem);
@@ -540,7 +619,6 @@ $("delete-account-btn").addEventListener("click", async () => {
     });
     alert(`${data.status}\n${data.note}`);
     token = null;
-    localStorage.removeItem("alyo_token");
     showAuth();
   } catch (err) {
     toast(err.message, true);
@@ -550,12 +628,12 @@ $("delete-account-btn").addEventListener("click", async () => {
 /* ---------------- boot ---------------- */
 
 function consumeAuthRedirect() {
-  // Token handed back by the OAuth callback. The fragment never reaches the
-  // server, so it stays out of access logs; we clear it from the URL bar.
+  // Legacy hand-off: the OAuth callback sets an HttpOnly cookie AND (for
+  // device clients) still passes the token in the fragment. The fragment
+  // token is kept in memory only and never written to localStorage.
   const m = location.hash.match(/alyo_token=([A-Za-z0-9_-]+)/);
   if (m) {
     token = m[1];
-    localStorage.setItem("alyo_token", token);
     history.replaceState(null, "", location.pathname + location.search);
   }
   const params = new URLSearchParams(location.search);
@@ -574,6 +652,7 @@ function consumeAuthRedirect() {
 
 (async function boot() {
   consumeAuthRedirect();
-  if (token) await showApp();
-  else showAuth();
+  // Cookie-based sessions must work even with no token in memory (page
+  // refresh). showApp already falls back to the auth view on 401.
+  try { await showApp(); } catch (_) { showAuth(); }
 })();

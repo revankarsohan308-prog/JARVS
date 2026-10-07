@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ALYO — Diagnostics (development only)</title>
+  <style>
+    :root { --bg:#0f141a; --panel:#161d26; --panel2:#1d2632; --line:#2a3644;
+            --text:#e6edf5; --muted:#8fa1b5; --accent:#2dd4bf; --ok:#4ade80;
+            --warn:#fbbf24; --danger:#f87171; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text);
+           font-family:"Segoe UI", system-ui, sans-serif; padding:2rem 1rem; }
+    main { max-width:760px; margin:0 auto; }
+    h1 { font-size:1.3rem; letter-spacing:.08em; }
+    .muted { color:var(--muted); font-size:.85rem; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+            padding:.9rem 1rem; margin:1rem 0; }
+    .row { display:flex; justify-content:space-between; gap:1rem; padding:.35rem 0;
+           border-bottom:1px solid #1b2531; font-size:.9rem; }
+    .row:last-child { border-bottom:none; }
+    .ok { color:var(--ok); font-weight:600; }
+    .miss { color:var(--warn); font-weight:600; }
+    .fail { color:var(--danger); font-weight:600; }
+    button { background:var(--panel2); color:var(--text); border:1px solid var(--line);
+             border-radius:8px; padding:.5rem .9rem; cursor:pointer; font:inherit; }
+    button.primary { background:var(--accent); color:#04211d; font-weight:600; border-color:var(--accent); }
+    .actions { display:flex; gap:.6rem; flex-wrap:wrap; margin-top:1rem; }
+    #out { white-space:pre-wrap; font-size:.8rem; color:var(--muted);
+           background:#0b0f14; border:1px solid var(--line); border-radius:8px;
+           padding:.7rem; max-height:220px; overflow:auto; }
+    .badge { font-size:.7rem; padding:.15rem .5rem; border-radius:999px;
+             border:1px solid var(--line); color:var(--muted); }
+    .warn-note { color:var(--warn); font-size:.85rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>ALYO · Diagnostics</h1>
+  <p class="muted">Development-only. This page reports configuration status and never
+    displays passwords, OAuth secrets, tokens, or API keys.</p>
+
+  <div class="card">
+    <div class="row"><span>Backend</span><span id="d-backend">checking…</span></div>
+    <div class="row"><span>Database</span><span id="d-database">checking…</span></div>
+    <div class="row"><span>Session (cookie)</span><span id="d-session">checking…</span></div>
+    <div class="row"><span>AI provider</span><span id="d-ai">checking…</span></div>
+  </div>
+
+  <div class="card">
+    <b>Social sign-in</b>
+    <div id="d-providers"><p class="muted">checking…</p></div>
+    <p class="warn-note" id="d-providers-note"></p>
+  </div>
+
+  <div class="card">
+    <b>Current authentication state</b>
+    <div class="row"><span>Signed in</span><span id="d-auth">checking…</span></div>
+    <div class="row"><span>User</span><span id="d-user">—</span></div>
+    <div class="row"><span>Role</span><span id="d-role">—</span></div>
+
+    <div class="actions">
+      <button id="test-google" class="primary">TEST GOOGLE LOGIN</button>
+      <button id="test-session">TEST SESSION</button>
+      <button id="test-logout">TEST LOGOUT</button>
+    </div>
+  </div>
+
+  <div class="card"><b>Raw diagnostics (no secrets)</b><div id="out">…</div></div>
+
+  <script>
+    const API = "/api/v1";
+    const $ = (id) => document.getElementById(id);
+    const OK = (t) => `<span class="ok">${t}</span>`;
+    const MISS = (t) => `<span class="miss">${t}</span>`;
+    const FAIL = (t) => `<span class="fail">${t}</span>`;
+
+    async function get(path) {
+      const resp = await fetch(API + path, { credentials: "same-origin" });
+      let data = null;
+      try { data = await resp.json(); } catch (_) {}
+      if (!resp.ok) throw new Error((data && data.detail) || `HTTP ${resp.status}`);
+      return data;
+    }
+
+    async function refresh() {
+      $("out").textContent = "…";
+      try {
+        const d = await get("/system/diagnostics");
+        $("out").textContent = JSON.stringify(d, null, 2);
+        $("d-backend").innerHTML = d.backend.status === "ONLINE" ? OK(d.backend.status) : FAIL(d.backend.status);
+        $("d-database").innerHTML = d.database.status === "CONNECTED" ? OK(d.database.status) : FAIL(d.database.status);
+        $("d-session").innerHTML = d.session.status === "CONFIGURED" ? OK("CONFIGURED") : FAIL(d.session.status);
+        const ai = d.ai;
+        $("d-ai").innerHTML = ai.status === "CONFIGURED"
+          ? OK(`${ai.provider} · ${ai.mode}${ai.model ? " · " + ai.model : ""}`)
+          : MISS(`${ai.provider} · MISSING · ${ai.required_env_vars.join(", ")}`);
+        $("d-providers").innerHTML = d.social_signin.map((p) =>
+          `<div class="row"><span>${p.display_name}</span>` +
+          `<span>${p.status === "CONFIGURED" ? OK("CONFIGURED") : MISS("MISSING")}</span></div>` +
+          `<div class="muted" style="word-break:break-all">redirect: ${p.redirect_uri}` +
+          ` · env: ${p.required_env_vars.join(", ")}</div>`).join("");
+        const missing = d.social_signin.filter((p) => p.status === "MISSING");
+        $("d-providers-note").textContent = missing.length
+          ? "Social sign-in is not configured. Set the listed environment variables in .env and create the OAuth client with the redirect URI above."
+          : "";
+      } catch (err) {
+        $("out").textContent = `diagnostics failed: ${err.message}`;
+      }
+      try {
+        const me = await get("/auth/me");
+        $("d-auth").innerHTML = OK("YES");
+        $("d-user").textContent = me.user.username + " · " + (me.user.email || "(no email)");
+        $("d-role").textContent = me.user.role;
+      } catch (_) {
+        $("d-auth").innerHTML = MISS("no active session");
+      }
+    }
+
+    $("test-google").onclick = () => {
+      window.location.href = `${API}/auth/oauth/google/start`;
+    };
+    $("test-session").onclick = async () => {
+      try { const me = await get("/auth/me"); $("d-user").textContent = me.user.username; $("d-auth").innerHTML = OK("VALID SESSION"); }
+      catch (err) { $("d-auth").innerHTML = FAIL("INVALID: " + err.message); }
+    };
+    $("test-logout").onclick = async () => {
+      try { await get("/auth/logout"); location.hash = "#logged-out"; refresh(); }
+      catch (err) { $("d-auth").innerHTML = FAIL("LOGOUT FAILED: " + err.message); }
+    };
+
+    refresh();
+  </script>
+</main>
+</body>
+</html>

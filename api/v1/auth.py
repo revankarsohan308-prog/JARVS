@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from api.deps import CurrentUser, DbDep, require_permission
@@ -48,8 +48,26 @@ def _client_key(request: Request, username: str) -> str:
     return f"login:{host}:{username.lower()}"
 
 
+def _set_session_cookie(response: Response, token: str) -> None:
+    """Browser sessions ride a secure HttpOnly cookie, not localStorage.
+
+    SameSite=Lax blocks cross-site sends; Secure is on in production. The
+    token is additionally returned in the JSON body for device/gateway
+    clients (spec §20) and for the OAuth fragment hand-off.
+    """
+    response.set_cookie(
+        "alyo_session",
+        token,
+        max_age=settings.session_ttl_minutes * 60,
+        httponly=True,
+        samesite="lax",
+        secure=settings.environment == "production",
+        path="/",
+    )
+
+
 @router.post("/register", status_code=201)
-def register(body: RegisterIn, db: DbDep, request: Request):
+def register(body: RegisterIn, db: DbDep, request: Request, response: Response):
     """Open registration.
 
     The requested role is honoured only for the very first account (bootstrap
@@ -85,6 +103,7 @@ def register(body: RegisterIn, db: DbDep, request: Request):
     except IdentityError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     token, expires = identity.create_session(db, user, body.username)
+    _set_session_cookie(response, token)
     return {
         "ok": True,
         "token": token,
@@ -95,7 +114,7 @@ def register(body: RegisterIn, db: DbDep, request: Request):
 
 
 @router.post("/login")
-def login(body: LoginIn, db: DbDep, request: Request):
+def login(body: LoginIn, db: DbDep, request: Request, response: Response):
     key = _client_key(request, body.username)
     allowed, retry = limiter.check(key, settings.login_rate_limit, settings.login_rate_window)
     if not allowed:
@@ -126,6 +145,7 @@ def login(body: LoginIn, db: DbDep, request: Request):
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     limiter.reset(key)  # successful login clears the failure window
     token, expires = identity.create_session(db, user, body.client_label or body.username)
+    _set_session_cookie(response, token)
     return {
         "ok": True,
         "token": token,
@@ -138,13 +158,18 @@ def login(body: LoginIn, db: DbDep, request: Request):
 def logout(
     db: DbDep,
     user: CurrentUser,
+    response: Response,
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ):
     token = ""
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization.split(" ", 1)[1].strip()
+    else:
+        token = request.cookies.get("alyo_session", "").strip()
     if token:
         identity.revoke_session(db, token, actor=f"user:{user.username}")
+    response.delete_cookie("alyo_session", path="/")
     return {"ok": True, "detail": "Session revoked."}
 
 

@@ -187,4 +187,15 @@ def callback(provider_id: str, request: Request, db: DbDep, code: str = "", stat
     )
     response = RedirectResponse(f"{base}/#alyo_token={token}", status_code=302)
     response.delete_cookie(oauth.STATE_COOKIE, **response_delete)
+    # Same session cookie as password login: HttpOnly, SameSite=Lax, so the
+    # browser is not dependent on the URL fragment (spec §11).
+    response.set_cookie(
+        "alyo_session",
+        token,
+        max_age=settings.session_ttl_minutes * 60,
+        httponly=True,
+        samesite="lax",
+        secure=settings.environment == "production",
+        path="/",
+    )
     return response

@@ -16,9 +16,9 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from config.settings import PROJECT_ROOT, settings
 from core.agent.registry import registry
@@ -189,6 +189,19 @@ def create_app() -> FastAPI:
 
     # Web interface (served only if present).
     web_dir = PROJECT_ROOT / "apps" / "web"
+
+    # Development-only diagnostics page (spec §6/§7). Never exposed in
+    # production; the report contains no secrets. Registered before the
+    # static mount so the mount cannot shadow it.
+    @app.get("/dev/diagnostics", include_in_schema=False)
+    def dev_diagnostics(request: Request):
+        if settings.environment == "production":
+            raise HTTPException(status_code=404, detail="Diagnostics are disabled in production.")
+        page = PROJECT_ROOT / "dev_tools" / "diagnostics.html"
+        if not page.is_file():
+            raise HTTPException(status_code=404, detail="Diagnostics page not found.")
+        return FileResponse(page)
+
     if web_dir.is_dir():
         app.mount("/", NoCacheStaticFiles(directory=str(web_dir), html=True), name="web")
 

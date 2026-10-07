@@ -19,7 +19,11 @@ def _extract_token(request: Request, authorization: str | None) -> str:
     if authorization and authorization.lower().startswith("bearer "):
         return authorization.split(" ", 1)[1].strip()
     # Single-token header kept for device/gateway clients (spec §20).
-    return request.headers.get("x-alyo-token", "").strip()
+    header = request.headers.get("x-alyo-token", "").strip()
+    if header:
+        return header
+    # Browser sessions: HttpOnly, SameSite=Lax cookie (never localStorage).
+    return request.cookies.get("alyo_session", "").strip()
 
 
 def current_user(

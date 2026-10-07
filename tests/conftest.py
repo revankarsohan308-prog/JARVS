@@ -15,6 +15,10 @@ import pytest
 os.environ.setdefault("ALYO_PBKDF2_ITERATIONS", "10000")
 os.environ.setdefault("ALYO_DATABASE_URL", "sqlite:///./data/test_alayo.db")
 os.environ.setdefault("ALYO_ENVIRONMENT", "test")
+# Isolate tests from a developer .env: always run the local brain so
+# assertions on provider status are deterministic.
+os.environ.setdefault("ALYO_LLM_PROVIDER", "local")
+os.environ.setdefault("ALYO_OPENAI_API_KEY", "")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
