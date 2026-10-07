@@ -1,93 +1,127 @@
-# ALYO Architecture
+# J.A.R.V.S — Architecture
 
-Milestone 1 (ALYO Core) — layered monolith, no external services required.
+**JUST A RATHER VERY INTELLIGENT SYSTEM** · Owner: **Sohan Revankar**
 
-## Layers
+> Design rule: real functionality only. Every component is either working,
+> honestly `NOT IMPLEMENTED` with a documented integration path, or reports
+> "Integration not configured." with the exact environment variables it needs.
+> No fake buttons, fake AI, fake microphone, fake payments, or fake security.
+
+---
+
+## 1. What J.A.R.V.S is
+
+A personal & institutional AI command center that understands natural
+language, remembers permitted information, creates and manages tasks, plans
+multi-step "missions", executes **approved** tools behind a permission +
+confirmation gate, and communicates naturally.
+
+It serves many roles on one install: OWNER, SUPER_ADMIN, ADMINISTRATOR,
+VICE_CHANCELLOR, FINANCE_OFFICER, DEPARTMENT_HEAD, LECTURER, TEACHER, STAFF,
+STUDENT, SENIOR_USER, GENERAL_USER — each with its own permissions, tasks,
+memory, and dashboards. **User A must never see User B's private data.**
+
+## 2. Stack (chosen against this machine's real toolchain)
+
+| Layer | Choice | Why (honest) |
+|---|---|---|
+| API + engine | Python **FastAPI** (existing, 109 tests, running) | Already real, tested, and owns auth/RBAC/tasks/memory/security/health |
+| Desktop shell | **Electron** (Node 24 present) | Rust is **not installed**; Tauri cannot build here today. React/TS frontend is shell-agnostic, so Tauri is a drop-in later |
+| Desktop UI | **React + TypeScript + Vite** (Node 24/npm 11) | Spec's preferred frontend |
+| Web | `apps/web` (existing static UI against `/api/v1`) | Ship now, replace look with the shared React UI later |
+| Database | **SQLite** local (dev, WAL) → **PostgreSQL** production | Connection string (`ALYO_DATABASE_URL`) is config-only; Postgres is a deployment change, not a rewrite |
+| AI | Provider abstraction (`local` rules → `openai` → Claude etc.) | No key = honest local rules; key = real AI. No hidden charges |
+| Voice | STT/TTS abstraction, local-first where practical | `NOT IMPLEMENTED` until a real engine is configured (see docs/VOICE.md later) |
+| Payments | Abstraction only; no provider, no secrets | `NOT IMPLEMENTED` — real provider + webhook verification is owner-configured |
+
+**Why not Tauri right now:** `rustc`/`cargo` are absent. Installing Rust +
+MSVC toolchain is a ~2 GB, admin-required step that can fail silently on this
+box. Electron gives a genuine installable Windows app today; the UI is built
+so the shell can be swapped. (Decision recorded per "choose the safest
+practical default and explain it".)
+
+## 3. Repository structure
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  apps/web            Single-page UI (vanilla JS)        │
-├─────────────────────────────────────────────────────────┤
-│  api/                FastAPI app + versioned routers    │
-│    api/v1/*          auth, brain, memory, tasks,        │
-│                      system, security, privacy         │
-│    api/deps.py       authentication + RBAC guards       │
-├─────────────────────────────────────────────────────────┤
-│  core/               Domain logic                       │
-│    identity          password hashing, sessions         │
-│    permissions       pure RBAC functions                │
-│    memory            owner-scoped store, secret guard   │
-│    tasks             CRUD, recurrence, reminders        │
-│    agent             tool registry + permission gates   │
-│    brain             orchestrator, providers, rules     │
-├─────────────────────────────────────────────────────────┤
-│  security/           audit (append-only), rate limits,  │
-│                      threat/bug monitoring              │
-│  retention.py        Retention & deletion engine (§16)  │
-├─────────────────────────────────────────────────────────┤
-│  database/           SQLAlchemy models + engine (SQLite)│
-│  config/             Settings (ALYO_ env prefix)        │
-└─────────────────────────────────────────────────────────┘
+JARVS/
+├── apps/
+│   ├── web/            # browser UI (live today)
+│   └── desktop/        # Electron + React/TS desktop foundation (Phase 2+)
+├── api/v1/             # versioned REST API (auth, brain, tasks, memory, …)
+├── core/               # identity, brain, memory, tasks, permissions, pc …
+├── database/           # SQLAlchemy models + session
+├── config/             # pydantic-settings, ALYO_ env prefix (stable)
+├── security/           # audit, monitoring, rate-limit, containment
+├── dev_tools/          # dev-only diagnostics page (404 in production)
+├── docs/               # ARCHITECTURE, SECURITY, DATABASE, API, …
+├── scripts/            # start/stop, firewall helper (port-8760, admin)
+├── tests/              # 109 tests, pytest
+├── .env                # git-ignored secrets/configuration
+└── .env.example
 ```
 
-**Dependency rule:** `api → core → security/database/config`. Lower layers never
-import FastAPI. `security/` may be called from any layer but depends only on
-`database/` and `config/`.
+Internal module names and the `ALYO_` env prefix are kept stable so the
+existing `.env`, tests, and scripts keep working. Only the user-visible
+identity is **J.A.R.V.S**.
 
-## Request lifecycle (chat example)
+## 4. Seed data (real accounts, first run)
 
-1. `POST /api/v1/brain/chat` → `api/deps.current_user` resolves the bearer
-   token to a `User` row (only token digests are stored).
-2. `orchestrator.handle_message`:
-   - rate limit check (per-user, sliding window),
-   - conversation turn saved (unless the user disabled history),
-   - wake word stripped (`Hey Jarvis,` / `ALYO`),
-   - **rule engine** handles deterministic intents offline
-     (greetings, status, time, remember/recall, tasks, confirmations),
-   - otherwise the **provider** runs (`local` fallback or `openai`) and may call
-     tools through the registry for a bounded number of rounds,
-   - if neither can answer honestly, `_fallback_reply` states that no AI model
-     is configured and how to configure one — it never invents an answer.
-3. Every tool call goes through **one path**: `registry.execute_tool`, which
-   checks availability → RBAC permission → confirmation requirement, executes,
-   audits, and returns an `ExecutionResult` with `verified` / `ok` flags.
+- `demo-admin` / `demo-pass-123` — SUPER_ADMIN (owner bootstrap)
+- Owner contact account: `revankarsohan308@gmail.com` (STUDENT) — the owner's
+  real account can be promoted via RBAC, **never** via a hardcoded bypass.
 
-## Key invariants
+## 5. Security model (already implemented)
 
-- **REAL > DEMO.** Handlers return `verified: True` only when work actually ran.
-  Unavailable integrations are registered *disabled* with their exact
-  configuration requirement.
-- **One tool path.** No route or brain branch may call domain logic that skips
-  `execute_tool`; permissions cannot be bypassed.
-- **Owner scoping.** Memory, tasks, conversations and confirmations are filtered
-  by `user_id` in the service layer, not just the route layer.
-- **Append-only audit.** `security/audit.py` installs ORM hooks that raise on
-  any UPDATE/DELETE of `audit_logs`; secrets in details are redacted before write.
-- **Fail closed.** Unknown role or permission → no permission.
+- Pbkdf2 password hashing (configurable rounds; Argon2id is a settings swap)
+- Server-side authorization on **every** endpoint; never trust the frontend
+- RBAC roles + permission checks; tenant/user isolation on memory/tasks
+- HttpOnly SameSite=Lax session cookie; bearer/`x-alyo-token` for device clients
+- Rate limiting (login 5/60s, chat 30/60s, OAuth 20/300s) + denial windows
+- Audit log + security-event scoring + suspicious-login detection
+- Diagnostics that report status without ever exposing secrets
+- No hardcoded passwords or keys anywhere
 
-## Extension points
+## 6. Cost model
 
-| To add… | Do this |
-| --- | --- |
-| A new tool | Write a handler in `core/agent/catalog.py`, register a `ToolSpec` with a `required_permission` and `PermissionLevel`, then add a rule-engine intent (optional) in `orchestrator._rule_engine`. Permission, confirmation, audit and `verified` handling come for free. |
-| A new route | Create `api/v1/<name>.py` with an `APIRouter`, guard with `Annotated[User, Depends(require_permission(Permission.X))]`, mount in `api/app.py`. |
-| A new role/permission | Extend `Role`/`Permission` and the map in `core/permissions/rbac.py`; monotonic tests in `tests/test_rbac.py` enforce least-privilege ordering. |
-| A new data category | Add the model in `database/models.py`, retention rule in `retention.py`, policy entry in `api/v1/privacy.py::data_retention_policy`. |
-| Another database | Create a new engine in `database/session.py`; models are portable SQLAlchemy 2.0. |
-| Another LLM | Subclass `LLMProvider` in `core/brain/providers.py` and return it from `get_provider`. |
+| Component | Cost |
+|---|---|
+| Engine, DB, desktop shell, UI, local rules AI | **Free / open-source** |
+| OpenAI real chat | **Paid** (your key; `ALYO_OPENAI_API_KEY`) — never claimed as free |
+| Google/LinkedIn sign-in | Free, but the OAuth clients must be created in the owner's accounts |
+| Payments | Provider fees only, once a provider is chosen (owner decision) |
+| Voice STT/TTS | Local engines preferred; cloud engines would be provider-paid |
 
-## Configuration
+## 7. Milestones (phase plan from the spec)
 
-`config/settings.py` (pydantic-settings) reads `.env` with the `ALYO_` prefix.
-The database URL is resolved relative to the project root so relative paths in
-`.env` behave the same from any working directory.
+1. ✅ Architecture + repository (**this doc**)
+2. ◐ Desktop shell + futuristic UI (started: `apps/desktop`)
+3. ▪ Authentication (exists via API — desktop login next)
+4. ▪ Database (exists)
+5. ▪ RBAC/security (exists, hardening next)
+6. ▪ Task engine (exists; desktop screens next)
+7. ▪ Long-term memory (exists)
+8. ▪ AI brain/orchestrator (exists; tools/planner expansion)
+9. ▪ Mission/agent engine (new)
+10. ▪ Voice + wake word (new; real engine only)
+11. ▪ Vision (new)
+12. ▪ PC tools + file intelligence (new; allowlist first)
+13. ▪ Notifications / automation (new)
+14. ▪ Trial/subscription + payment abstraction (price config exists; webhook path new)
+15. ▪ Owner Control Center (web exists; desktop panel next)
+16. ▪ Windows installer (electron-builder)
+17. ▪ Mobile API/client foundation (API-ready by design)
 
-## Concurrency & failure
+## 8. What is real today vs later
 
-- SQLite runs in WAL mode with foreign keys on.
-- Rate limiting and denial tracking are in-process (single-process deployment);
-  both degrade to fail-closed limits if the counter store is cleared.
-- The retention worker is an asyncio task started in the FastAPI lifespan;
-  every iteration is wrapped so one failure never kills it.
-- Unhandled exceptions become a **bug-detector event** (`security/monitoring.py`)
-  and the client receives a generic 500 with an `error_ref`, never a traceback.
+**Real now:** login/register, sessions, RBAC, tasks, reminders, memory, chat
+(local rules, or real AI once key is set), security center, audit, health,
+diagnostics, data export/delete, subscriptions config.
+
+**NOT IMPLEMENTED (honest labels in the UI):** voice/wake-word, vision, PC
+tool allowlist execution, notifications, payments, Android client.
+
+## 9. Verification loop
+
+Every phase: build → run tests (`pytest`) → run lint (`ruff`) → run the app →
+UI check against the live API → commit. An error stops the phase until the
+real cause is fixed. No "done" that isn't verified.

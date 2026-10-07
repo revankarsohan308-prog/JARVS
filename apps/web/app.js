@@ -1,4 +1,4 @@
-/* ALYO web interface — talks only to the real /api/v1 endpoints. */
+/* J.A.R.V.S web interface — talks only to the real /api/v1 endpoints. */
 "use strict";
 
 const API = "/api/v1";
@@ -253,7 +253,7 @@ function toolMeta(tools) {
 
 function showConfirmation(id, summary) {
   pendingConfirmation = id;
-  $("confirm-text").textContent = summary || "ALYO needs your approval for this action.";
+  $("confirm-text").textContent = summary || "J.A.R.V.S needs your approval for this action.";
   $("confirm-bar").classList.remove("hidden");
 }
 
@@ -505,7 +505,7 @@ async function loadSecurity() {
         `<div class="title">${esc(e.what_happened)}</div>` +
         `<div class="sub">Why flagged: ${esc(e.why_flagged || "—")}</div>` +
         `<div class="sub">Seriousness: ${esc(e.seriousness)}</div>` +
-        `<div class="sub">What ALYO did: ${esc(e.what_alyo_did)}</div>` +
+        `<div class="sub">What J.A.R.V.S did: ${esc(e.what_alyo_did)}</div>` +
         `<div class="sub">What you can do: ${esc(e.what_you_can_do)}</div>` +
         `</div><span class="pill risk-${esc(e.risk_band)}">${esc(e.status)}</span>`;
       box.appendChild(row);
@@ -604,7 +604,7 @@ $("export-btn").addEventListener("click", async () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `alyo-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `jarvis-export-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
     toast("Export downloaded (passwords and tokens are never included).");

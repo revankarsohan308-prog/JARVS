@@ -1,12 +1,18 @@
-# ALYO
+# J.A.R.V.S — Just A Rather Very Intelligent System
 
-**ALYO** is a personal AI assistant platform with a security-first foundation.
-Wake word: **"Hey Jarvis"**. Milestone 1 (ALYO Core) delivers the working core
-plus the baseline security layer from the specification.
+**J.A.R.V.S** is a personal & institutional AI assistant platform with a security-first foundation — a "smart brain + free hands + long-term memory + safe actions" command center for its owner, **Sohan Revankar**, and its users (students → lecturers → staff → finance → administration → VC → senior users).
+Wake word: **"Hey Jarvis"**. The engine implements the working core — real authentication, RBAC, tasks, memory, security center, health checks — plus the baseline security layer from the specification.
 
 > **Design rule:** real functionality only. Every tool result carries a
 > `verified` flag; anything not wired to a real integration answers
 > *"Integration not configured."* and tells you exactly what it needs.
+
+## Product layout
+
+- `apps/web` — browser UI (works today against `/api/v1`)
+- `apps/desktop` — **J.A.R.V.S desktop app** (Electron shell, React + TypeScript; Phase 2)
+- `api/`, `core/`, `database/` — the FastAPI engine (real, tested)
+- `docs/ARCHITECTURE.md` — architecture, security model, milestones, cost model
 
 ## What works today (Milestone 1)
 

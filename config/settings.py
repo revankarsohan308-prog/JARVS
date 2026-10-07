@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     )
 
     # Runtime ---------------------------------------------------------------
-    app_name: str = "ALYO"
+    app_name: str = "J.A.R.V.S"
     app_version: str = "0.1.0"
     environment: str = "development"
     app_host: str = "127.0.0.1"

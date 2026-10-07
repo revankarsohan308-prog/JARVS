@@ -1,4 +1,4 @@
-# ALYO API (v1)
+# J.A.R.V.S API (v1)
 
 Base path: `/api/v1` · Interactive docs: `/docs` · Auth: `Authorization: Bearer <token>`
 (also accepted: `x-alyo-token`). Errors are JSON: `{"detail": "…"}`.
