@@ -32,12 +32,15 @@ def stub_provider(monkeypatch, userinfo: dict, token_payload: dict | None = None
     monkeypatch.setattr(oauth_mod, "_get_json", lambda url, headers: dict(userinfo))
 
 
-def start_flow(client, provider: str = "google") -> str:
+def start_flow(client, provider: str = "google", *, pkce: bool = True) -> str:
     """Kick off the flow; return the state param (cookie lands in the jar)."""
     resp = client.get(f"/api/v1/auth/oauth/{provider}/start", follow_redirects=False)
     assert resp.status_code == 302, resp.text
     query = parse_qs(urlparse(resp.headers["location"]).query)
-    assert query["code_challenge_method"] == ["S256"]
+    if pkce:
+        assert query["code_challenge_method"] == ["S256"]
+    else:
+        assert "code_challenge" not in query  # provider without PKCE support
     assert query["response_type"] == ["code"]
     return query["state"][0]
 
@@ -60,7 +63,7 @@ def test_providers_endpoint_reports_unconfigured_honestly(client):
     assert resp.status_code == 200
     body = resp.json()
     ids = {p["id"] for p in body["providers"]}
-    assert ids == {"google", "linkedin"}
+    assert ids == {"google", "linkedin", "facebook"}
     for p in body["providers"]:
         assert p["configured"] is False
         assert "Integration not configured" in p["note"]
@@ -364,3 +367,98 @@ def test_unusable_provider_response_is_an_error_not_a_login(client, db, google_c
     from database.models import User
 
     assert db.scalar(select(User)) is None
+
+
+# ----------------------------------------------------------------------
+# Facebook (current Graph API v26 manual code flow; no PKCE, no email proof)
+# ----------------------------------------------------------------------
+
+
+@pytest.fixture()
+def facebook_configured(monkeypatch):
+    from config.settings import settings
+
+    monkeypatch.setattr(settings, "facebook_client_id", "fb-client")
+    monkeypatch.setattr(settings, "facebook_client_secret", "fb-secret")
+    return settings
+
+
+def test_facebook_start_uses_current_dialog_without_pkce(client, facebook_configured):
+    resp = client.get("/api/v1/auth/oauth/facebook/start", follow_redirects=False)
+    assert resp.status_code == 302
+    location = resp.headers["location"]
+    assert location.startswith("https://www.facebook.com/v26.0/dialog/oauth?")
+    query = parse_qs(urlparse(location).query)
+    assert query["response_type"] == ["code"]
+    assert "code_challenge" not in query  # Facebook PKCE is OIDC-only
+    assert query["scope"] == ["email public_profile"]
+    assert "state" in query
+
+
+def test_facebook_exchange_omits_code_verifier(client, facebook_configured, monkeypatch):
+    seen: list[tuple[str, dict]] = []
+
+    from core.identity import oauth as oauth_mod
+
+    monkeypatch.setattr(
+        oauth_mod, "_post_json", lambda url, data: seen.append((url, dict(data))) or {"access_token": "fb-tok"}
+    )
+    monkeypatch.setattr(
+        oauth_mod,
+        "_get_json",
+        lambda url, headers: seen.append((url, dict(headers))) or {"id": "fb-1", "email": "fan@example.com", "name": "Fan"},
+    )
+    state = start_flow(client, "facebook", pkce=False)
+    resp = finish_flow(client, state, provider="facebook")
+    assert resp.status_code == 302
+    _, token_data = seen[0]
+    assert "code_verifier" not in token_data
+    assert token_data["client_id"] == "fb-client"
+    assert token_data["client_secret"] == "fb-secret"
+    assert seen[-1][0] == "https://graph.facebook.com/v26.0/me?fields=id,name,email"
+
+
+def test_facebook_id_becomes_subject_and_email_stays_unverified(client, db, facebook_configured, monkeypatch):
+    stub_provider(
+        monkeypatch,
+        {"id": "fb-42", "email": "soccer@example.com", "name": "Sunny"},
+    )
+    resp = finish_flow(client, start_flow(client, "facebook", pkce=False), provider="facebook")
+    assert resp.status_code == 302
+    assert "#alyo_token=" in resp.headers["location"]
+
+    from database.models import OAuthIdentity, User
+
+    user = db.scalar(select(User))
+    assert user is not None
+    # Meta proves nothing about the address → it stays on the identity row
+    # only, never in the unique users.email column (takeover/triage safety).
+    assert user.email is None
+    assert user.email_verified is False
+    identity_row = db.scalar(select(OAuthIdentity))
+    assert (identity_row.provider, identity_row.subject) == ("facebook", "fb-42")
+    assert identity_row.email == "soccer@example.com"
+
+
+def test_facebook_unverified_email_cannot_capture_a_password_account(client, db, facebook_configured, monkeypatch):
+    """Register a password account with email X, then Facebook claims X.
+
+    Meta never asserts email ownership, so the Facebook identity must get a
+    separate account instead of silently taking over the password account.
+    """
+    register(client, "owned", email="shared@example.com")
+
+    stub_provider(monkeypatch, {"id": "fb-7", "email": "shared@example.com", "name": "Intruder"})
+    resp = finish_flow(client, start_flow(client, "facebook", pkce=False), provider="facebook")
+    assert resp.status_code == 302
+
+    from database.models import OAuthIdentity, User
+
+    users = list(db.scalars(select(User).order_by(User.id)))
+    assert len(users) == 2  # a brand-new account for the unproven Facebook identity
+    # The password account did NOT gain a Facebook identity.
+    assert [u.email for u in users] == ["shared@example.com", None]
+
+    identity_row = db.scalar(select(OAuthIdentity))
+    assert (identity_row.provider, identity_row.subject) == ("facebook", "fb-7")
+    assert identity_row.user_id != users[0].id  # not linked to the password account

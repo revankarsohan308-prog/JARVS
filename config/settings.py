@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     linkedin_client_id: str = ""
     linkedin_client_secret: str = ""
+    facebook_client_id: str = ""
+    facebook_client_secret: str = ""
     # Create an account automatically on first social login (else link-only).
     oauth_auto_provision: bool = True
     # Public origin used for the OAuth redirect URI behind a reverse proxy;
@@ -58,6 +60,9 @@ class Settings(BaseSettings):
     linkedin_authorization_url: str = ""
     linkedin_token_url: str = ""
     linkedin_userinfo_url: str = ""
+    facebook_authorization_url: str = ""
+    facebook_token_url: str = ""
+    facebook_userinfo_url: str = ""
 
     # Brain -----------------------------------------------------------------
     wake_word: str = "hey jarvis"

@@ -7,3 +7,10 @@ __pycache__/
 data/
 logs/
 *.db
+
+# PlatformIO / ESP32 build artifacts
+firmware/.pio/
+.pio/
+*.bin
+*.elf
+*.map

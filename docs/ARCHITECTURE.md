@@ -31,7 +31,7 @@ memory, and dashboards. **User A must never see User B's private data.**
 | Web | `apps/web` (existing static UI against `/api/v1`) | Ship now, replace look with the shared React UI later |
 | Database | **SQLite** local (dev, WAL) → **PostgreSQL** production | Connection string (`ALYO_DATABASE_URL`) is config-only; Postgres is a deployment change, not a rewrite |
 | AI | Provider abstraction (`local` rules → `openai` → Claude etc.) | No key = honest local rules; key = real AI. No hidden charges |
-| Voice | STT/TTS abstraction, local-first where practical | `NOT IMPLEMENTED` until a real engine is configured (see docs/VOICE.md later) |
+| Voice | Real WS voice plane `backend/voice` (:8761): VAD → STT → Brain → TTS, same Brain as chat | Engine-gated: `ALYO_STT_PROVIDER` / `ALYO_TTS_PROVIDER` (see [docs/voice.md](voice.md)); offline engines answer `stt_offline`/`tts_offline` honestly. Wake-word *triggering* is a later phase |
 | Payments | Abstraction only; no provider, no secrets | `NOT IMPLEMENTED` — real provider + webhook verification is owner-configured |
 
 **Why not Tauri right now:** `rustc`/`cargo` are absent. Installing Rust +
@@ -47,15 +47,17 @@ JARVS/
 ├── apps/
 │   ├── web/            # browser UI (live today)
 │   └── desktop/        # Electron + React/TS desktop foundation (Phase 2+)
-├── api/v1/             # versioned REST API (auth, brain, tasks, memory, …)
-├── core/               # identity, brain, memory, tasks, permissions, pc …
-├── database/           # SQLAlchemy models + session
+├── api/v1/             # versioned REST API (auth, brain, tasks, memory, devices, …)
+├── backend/voice/      # real voice plane — WS :8761, VAD/STT/Brain/TTS, device auth
+├── core/               # identity, brain, memory, tasks, permissions, devices, pc …
+├── database/           # SQLAlchemy models + session (Device model included)
 ├── config/             # pydantic-settings, ALYO_ env prefix (stable)
 ├── security/           # audit, monitoring, rate-limit, containment
+├── firmware/           # J.A.R.V.S LINK V1 — ESP32-S3 (PlatformIO; pins = -1 until confirmed)
 ├── dev_tools/          # dev-only diagnostics page (404 in production)
-├── docs/               # ARCHITECTURE, SECURITY, DATABASE, API, …
+├── docs/               # ARCHITECTURE, SECURITY, DATABASE, API, VOICE, HARDWARE, …
 ├── scripts/            # start/stop, firewall helper (port-8760, admin)
-├── tests/              # 109 tests, pytest
+├── tests/              # 144 tests, pytest
 ├── .env                # git-ignored secrets/configuration
 └── .env.example
 ```
@@ -102,7 +104,9 @@ identity is **J.A.R.V.S**.
 7. ▪ Long-term memory (exists)
 8. ▪ AI brain/orchestrator (exists; tools/planner expansion)
 9. ▪ Mission/agent engine (new)
-10. ▪ Voice + wake word (new; real engine only)
+10. ◐ Voice plane + wake word — backend **real + tested** (docs/voice.md);
+    LINK firmware scaffolded (docs/hardware.md, compile check pending);
+    **wake-word triggering** new/real-engine-only
 11. ▪ Vision (new)
 12. ▪ PC tools + file intelligence (new; allowlist first)
 13. ▪ Notifications / automation (new)
@@ -115,10 +119,12 @@ identity is **J.A.R.V.S**.
 
 **Real now:** login/register, sessions, RBAC, tasks, reminders, memory, chat
 (local rules, or real AI once key is set), security center, audit, health,
-diagnostics, data export/delete, subscriptions config.
+diagnostics, data export/delete, subscriptions config, **device pairing +
+ownership (J.A.R.V.S LINK)**, **voice plane** (VAD→STT→Brain→TTS over a
+token-authenticated WebSocket; engines honest-offline by default).
 
-**NOT IMPLEMENTED (honest labels in the UI):** voice/wake-word, vision, PC
-tool allowlist execution, notifications, payments, Android client.
+**NOT IMPLEMENTED (honest labels in the UI):** wake-word *triggering*, vision,
+PC tool allowlist execution, notifications, payments, Android client.
 
 ## 9. Verification loop
 

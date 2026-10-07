@@ -14,7 +14,7 @@ def test_diagnostics_reports_full_status_without_secrets(client):
     assert "alyo_session" in body["session"]["cookie"]
 
     ids = {p["id"] for p in body["social_signin"]}
-    assert ids == {"google", "linkedin"}
+    assert ids == {"google", "linkedin", "facebook"}
     for p in body["social_signin"]:
         assert p["status"] == "MISSING"  # nothing configured in tests
         assert p["required_env_vars"]  # exact variable names named

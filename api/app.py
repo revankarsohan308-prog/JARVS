@@ -169,6 +169,7 @@ def create_app() -> FastAPI:
     from api.v1 import (
         auth,
         brain,
+        devices,
         oauth,
         privacy,
         security,
@@ -177,7 +178,7 @@ def create_app() -> FastAPI:
     )
 
     prefix = "/api/v1"
-    for module in (auth, brain, oauth, privacy, security, system, tasks):
+    for module in (auth, brain, devices, oauth, privacy, security, system, tasks):
         app.include_router(module.router, prefix=prefix)
 
     from api.v1 import memory as memory_routes

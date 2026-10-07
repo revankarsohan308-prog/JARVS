@@ -92,6 +92,39 @@ class OAuthIdentity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Device(Base):
+    """A J.A.R.V.S LINK (or other paired client) owned by a user.
+
+    - ``device_id`` is the public stable identifier the firmware displays.
+    - ``token_hash`` is the SHA-256 digest of the one-time device token that
+      was shown exactly once at pairing time — the token itself is never
+      stored (same rule as session tokens).
+    - ``pairing_code_hash`` holds the digest + expiry of an in-flight pairing
+      code so a revoked code can never be replayed.
+    - ``state`` mirrors the OLED lifecycle: offline / ready / listening /
+      thinking / speaking / error.
+    """
+
+    __tablename__ = "devices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    device_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    public_id: Mapped[str] = mapped_column(String(32), unique=True, default=new_id)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(128), default="J.A.R.V.S LINK")
+    kind: Mapped[str] = mapped_column(String(32), default="jarvs-link")
+    firmware: Mapped[str] = mapped_column(String(64), default="unknown")
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    pairing_code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pairing_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    state: Mapped[str] = mapped_column(String(24), default="offline", index=True)
+    battery_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    signal_dbm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class ConversationTurn(Base):
     """Short-term memory: the running conversation, per user."""
 

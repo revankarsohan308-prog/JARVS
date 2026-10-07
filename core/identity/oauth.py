@@ -45,6 +45,10 @@ class Provider:
     scopes: tuple[str, ...]
     client_id_setting: str  # env var name, e.g. ALYO_GOOGLE_CLIENT_ID
     client_secret_setting: str
+    # PKCE S256 on the authorize+exchange flow. Providers without server-side
+    # PKCE support (Facebook: PKCE is OIDC-only) rely on state + the
+    # server-side secret exchange instead — both are still real protections.
+    use_pkce: bool = True
     extra_auth_params: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -80,6 +84,23 @@ PROVIDERS: dict[str, Provider] = {
         scopes=("openid", "email", "profile"),
         client_id_setting="ALYO_LINKEDIN_CLIENT_ID",
         client_secret_setting="ALYO_LINKEDIN_CLIENT_SECRET",
+    ),
+    "facebook": Provider(
+        id="facebook",
+        display_name="Facebook",
+        # Current official manual flow (developers.facebook.com — "Manually
+        # Build a Login Flow"): authorize dialog → server-side code exchange →
+        # GET /me?fields=id,name,email. Graph API v26.0 is pinned and
+        # overridable via ALYO_FACEBOOK_*_URL for a future version bump.
+        authorization_endpoint="https://www.facebook.com/v26.0/dialog/oauth",
+        token_endpoint="https://graph.facebook.com/v26.0/oauth/access_token",
+        userinfo_endpoint="https://graph.facebook.com/v26.0/me?fields=id,name,email",
+        scopes=("email", "public_profile"),
+        client_id_setting="ALYO_FACEBOOK_CLIENT_ID",
+        client_secret_setting="ALYO_FACEBOOK_CLIENT_SECRET",
+        # PKCE is only supported on Facebook's OIDC flow; the classic code flow
+        # (which this registry implements) relies on state + secret exchange.
+        use_pkce=False,
     ),
 }
 
@@ -191,10 +212,11 @@ def build_authorization_url(provider: Provider, redirect_uri: str, state: str, c
         "response_type": "code",
         "scope": " ".join(provider.scopes),
         "state": state,
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
         **provider.extra_auth_params,
     }
+    if provider.use_pkce:
+        params["code_challenge"] = challenge
+        params["code_challenge_method"] = "S256"
     target = endpoint(provider, "authorization")
     sep = "&" if "?" in target else "?"
     return f"{target}{sep}{urlencode(params)}"
@@ -218,18 +240,17 @@ def _get_json(url: str, headers: dict) -> dict:
 
 def exchange_code(provider: Provider, code: str, redirect_uri: str, verifier: str) -> str:
     """Authorization code → access token (one call, no token stored)."""
+    payload_args: dict = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": provider.client_id,
+        "client_secret": provider.client_secret,
+    }
+    if provider.use_pkce:
+        payload_args["code_verifier"] = verifier
     try:
-        payload = _post_json(
-            endpoint(provider, "token"),
-            {
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "client_id": provider.client_id,
-                "client_secret": provider.client_secret,
-                "code_verifier": verifier,
-            },
-        )
+        payload = _post_json(endpoint(provider, "token"), payload_args)
     except httpx.HTTPError as exc:
         raise OAuthError(
             f"{provider.display_name} did not respond to the token exchange ({type(exc).__name__}). "
@@ -252,8 +273,17 @@ def fetch_userinfo(provider: Provider, access_token: str) -> dict:
             f"{provider.display_name} did not respond to the identity request ({type(exc).__name__}). "
             "Nothing was signed in — try again."
         ) from exc
-    if not info.get("sub"):
+    # OIDC providers assert ``sub``; Facebook's Graph API asserts ``id``.
+    subject = info.get("sub") or info.get("id")
+    if not subject:
         raise OAuthError(f"{provider.display_name} returned no subject id (sub); sign-in aborted.")
+    info["sub"] = str(subject)
+    if provider.id == "facebook":
+        # Meta provides NO email-verification signal (Facebook Login docs):
+        # always treat the address as unverified. This keeps the verified-email
+        # account-linking defence intact — a Facebook identity can never be
+        # used to take over a password account.
+        info.setdefault("email_verified", False)
     return info
 
 
