@@ -9,10 +9,15 @@ token is never stored server-side, only its digest.
 
 from __future__ import annotations
 
+import json
+import os
+import urllib.request
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from api.deps import CurrentUser, DbDep
+from backend.voice.config import voice_config
 from core.devices import (
     DeviceError,
     create_pairing_code,
@@ -63,6 +68,36 @@ class TelemetryIn(BaseModel):
 @router.get("")
 def list_my_devices(user: CurrentUser, db: DbDep):
     return {"devices": [_to_public(d) for d in list_devices(db, user.id)]}
+
+
+def fetch_voice_status() -> dict:
+    """Live LINK-plane status proxied from the voice server.
+
+    Honest by construction: OFFLINE when the voice server is unreachable, never
+    a simulated state. Only device IDs and STT/TTS capability labels cross this
+    boundary — no tokens, no audio.
+    """
+    url = os.environ.get("ALYO_VOICE_SERVER_URL") or f"http://127.0.0.1:{voice_config.port}/health"
+    try:
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        return {
+            "voice_server": "ONLINE" if payload.get("status") == "ONLINE" else "UNKNOWN",
+            "stt": payload.get("stt"),
+            "tts": payload.get("tts"),
+            "connected_devices": sorted(payload.get("connected_devices") or []),
+        }
+    except Exception:
+        return {"voice_server": "OFFLINE", "stt": None, "tts": None, "connected_devices": []}
+
+
+@router.get("/voice-status")
+def voice_status(user: CurrentUser, db: DbDep):
+    """Live voice-plane view, filtered to the caller's own devices (isolation)."""
+    status = fetch_voice_status()
+    mine = {d.device_id for d in list_devices(db, user.id)}
+    status["connected_devices"] = [did for did in status["connected_devices"] if did in mine]
+    return status
 
 
 @router.post("/pairing")

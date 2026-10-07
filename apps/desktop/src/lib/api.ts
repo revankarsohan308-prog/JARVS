@@ -95,6 +95,49 @@ export interface MemoryStats {
   by_category: Record<string, number>;
 }
 
+export interface DeviceRow {
+  device_id: string;
+  name: string;
+  kind: string;
+  firmware: string;
+  state: string;
+  battery_pct: number | null;
+  signal_dbm: number | null;
+  last_seen_at: string | null;
+  paired: boolean;
+  created_at: string;
+  token?: string | null;
+}
+
+export interface VoicePlaneStatus {
+  provider: string;
+  model?: string;
+  voice?: string;
+  language?: string;
+  available: boolean;
+  detail: string;
+}
+
+export interface VoiceStatus {
+  voice_server: string;
+  stt: VoicePlaneStatus | null;
+  tts: VoicePlaneStatus | null;
+  connected_devices: string[];
+}
+
+export const devices = {
+  list: () => api<{ devices: DeviceRow[] }>('/devices'),
+  pairing: (name = 'J.A.R.V.S LINK') =>
+    api<{ code: string; expires_at: number; expires_in_seconds: number }>('/devices/pairing', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  pair: (code: string, name = 'J.A.R.V.S LINK') =>
+    api<DeviceRow>('/devices/pair', { method: 'POST', body: JSON.stringify({ code, name }) }),
+  revoke: (deviceId: string) => api<{ ok: boolean }>(`/devices/${deviceId}`, { method: 'DELETE' }),
+  voiceStatus: () => api<VoiceStatus>('/devices/voice-status'),
+};
+
 export interface MemoryExport {
   exported_for: string;
   category: string;

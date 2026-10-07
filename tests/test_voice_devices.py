@@ -151,3 +151,36 @@ def test_telemetry_is_owner_scoped_and_visible(client, db, owner):
 
     rows = list_devices(db, db.scalar(select(Device)).owner_user_id)
     assert rows[0].last_seen_at is not None
+
+
+def test_voice_status_is_offline_when_server_unreachable(client, db, owner, monkeypatch):
+    # Point the proxy at a port nothing listens on — the honest answer is OFFLINE,
+    # never a simulated state.
+    monkeypatch.setenv("ALYO_VOICE_SERVER_URL", "http://127.0.0.1:1/health")
+    resp = client.get("/api/v1/devices/voice-status", headers=auth_headers(owner["token"]))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["voice_server"] == "OFFLINE"
+    assert body["connected_devices"] == []
+    assert "stt" in body and "tts" in body
+
+
+def test_voice_status_is_filtered_to_own_devices(client, db, owner, monkeypatch):
+    token = owner["token"]
+    paired = _pair_through_api(client, token)
+    monkeypatch.setattr(
+        "api.v1.devices.fetch_voice_status",
+        lambda: {
+            "voice_server": "ONLINE",
+            "stt": "whisper",
+            "tts": "edge",
+            "connected_devices": [paired["device_id"], "jarvs-link-other-user"],
+        },
+    )
+    resp = client.get("/api/v1/devices/voice-status", headers=auth_headers(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["voice_server"] == "ONLINE"
+    assert body["connected_devices"] == [paired["device_id"]]
+    # The other user's device id is never leaked to this owner.
+    assert "jarvs-link-other-user" not in body["connected_devices"]

@@ -3,6 +3,7 @@ import {
   ApiError,
   auth,
   chat,
+  devices,
   memory,
   MEMORY_CATEGORIES,
   system,
@@ -10,11 +11,13 @@ import {
   TASK_PRIORITIES,
   TASK_RECURRENCE,
   TASK_STATUSES,
+  type DeviceRow,
   type HealthCheck,
   type MemoryRow,
   type MemoryStats,
   type PublicUser,
   type Task,
+  type VoiceStatus,
 } from './lib/api';
 
 type CoreState = 'IDLE' | 'THINKING' | 'ERROR' | 'OFFLINE';
@@ -232,6 +235,8 @@ export default function App() {
             <TaskPanel tasks={tasksList} onMutated={loadData} />
           ) : active === 'Memory' ? (
             <MemoryPanel memories={memories} stats={memStats} onMutated={loadData} />
+          ) : active === 'Devices' ? (
+            <DevicesPanel />
           ) : (
             <div className="placeholder">
               <strong>{active}</strong>
@@ -774,6 +779,243 @@ function MemoryPanel({
               </li>
             ),
           )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function DevicesPanel() {
+  const [list, setList] = useState<DeviceRow[]>([]);
+  const [voice, setVoice] = useState<VoiceStatus | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [pairState, setPairState] = useState<'idle' | 'code' | 'token'>('idle');
+  const [code, setCode] = useState('');
+  const [expiresIn, setExpiresIn] = useState(0);
+  const [codeInput, setCodeInput] = useState('');
+  const [name, setName] = useState('J.A.R.V.S LINK');
+  const [token, setToken] = useState<string | null>(null);
+  const [newDeviceId, setNewDeviceId] = useState('');
+  const [tokenCopied, setTokenCopied] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [d, v] = await Promise.all([devices.list(), devices.voiceStatus()]);
+      setList(d.devices);
+      setVoice(v);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load devices.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const id = window.setInterval(() => void refresh(), 15000);
+    return () => window.clearInterval(id);
+  }, [refresh]);
+
+  // One-second countdown while a pairing code is live.
+  useEffect(() => {
+    if (pairState !== 'code') return;
+    const id = window.setInterval(() => setExpiresIn((s) => Math.max(0, s - 1)), 1000);
+    return () => window.clearInterval(id);
+  }, [pairState]);
+
+  const startPairing = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      const res = await devices.pairing(name || 'J.A.R.V.S LINK');
+      setCode(res.code);
+      setExpiresIn(res.expires_in_seconds);
+      setPairState('code');
+      setToken(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start pairing.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pair = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const c = codeInput.trim();
+    if (c.length !== 6) return;
+    setError('');
+    setBusy(true);
+    try {
+      const dev = await devices.pair(c, name || 'J.A.R.V.S LINK');
+      setToken(dev.token ?? null);
+      setNewDeviceId(dev.device_id);
+      setPairState('token');
+      setCode('');
+      setCodeInput('');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Pairing failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async (deviceId: string) => {
+    if (!window.confirm('Revoke this device? It will be disconnected and its token stops working.')) return;
+    setError('');
+    setBusy(true);
+    try {
+      await devices.revoke(deviceId);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Revoke failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyToken = async () => {
+    if (!token) return;
+    try {
+      await navigator.clipboard.writeText(token);
+      setTokenCopied(true);
+      window.setTimeout(() => setTokenCopied(false), 2000);
+    } catch {
+      /* clipboard unavailable in some containers */
+    }
+  };
+
+  const connected = new Set(voice?.connected_devices ?? []);
+  const fmtCountdown = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const voiceLabel =
+    voice == null ? 'Voice server CHECKING…' : voice.voice_server === 'ONLINE' ? 'Voice server ONLINE' : 'Voice server OFFLINE';
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>Devices · J.A.R.V.S LINK</h2>
+        <div className="row-actions">
+          <button className="btn" onClick={() => void refresh()}>Refresh</button>
+          <button className="btn ok" onClick={startPairing} disabled={busy}>
+            {pairState === 'code' ? 'Generate new code' : '+ Start pairing'}
+          </button>
+        </div>
+      </div>
+      {error && <div className="error">{error}</div>}
+
+      <div className="stats-row">
+        <span className="chip">{voiceLabel}</span>
+        {voice && voice.stt && (
+          <span className="chip" title={voice.stt.detail}>
+            STT: {voice.stt.available ? `${voice.stt.provider}${voice.stt.model ? ` · ${voice.stt.model}` : ''}` : 'OFFLINE'}
+          </span>
+        )}
+        {voice && voice.tts && (
+          <span className="chip" title={voice.tts.detail}>
+            TTS: {voice.tts.available ? `${voice.tts.provider}${voice.tts.voice ? ` · ${voice.tts.voice}` : ''}` : 'OFFLINE'}
+          </span>
+        )}
+        <span className="chip">{connected.size} connected now</span>
+      </div>
+
+      {pairState === 'code' && (
+        <div className="pair-box">
+          <h3>Pairing code</h3>
+          <div className="pair-code">{code}</div>
+          <p className="muted">
+            {expiresIn > 0
+              ? `Expires in ${fmtCountdown(expiresIn)}. `
+              : 'This code has expired — generate a new one. '}
+            Enter it below to receive the one-time device token.
+          </p>
+          <form className="grid-form" onSubmit={pair}>
+            <label>
+              Pairing code
+              <input
+                value={codeInput}
+                onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+                maxLength={6}
+                placeholder="e.g. K7M2QP"
+                required
+              />
+            </label>
+            <label>
+              Device name
+              <input value={name} onChange={(e) => setName(e.target.value)} />
+            </label>
+            <div className="row-actions span2">
+              <button type="submit" className="btn ok" disabled={busy || expiresIn <= 0 || codeInput.length !== 6}>
+                {busy ? 'Pairing…' : 'Pair device'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {pairState === 'token' && token && (
+        <div className="pair-box token-box">
+          <h3>Device paired — one-time token</h3>
+          <p className="muted">
+            This token is shown exactly once; only its SHA-256 digest is stored server-side. Flash it onto the ESP32:
+          </p>
+          <ol className="token-steps">
+            <li>Serial console: <code>set id {newDeviceId}</code></li>
+            <li>Then: <code>set token {token}</code></li>
+            <li>The LINK connects to the voice plane on <code>:8761</code> automatically.</li>
+          </ol>
+          <pre className="token">{token}</pre>
+          <div className="row-actions">
+            <button className="btn" onClick={copyToken}>{tokenCopied ? 'Copied ✓' : 'Copy token'}</button>
+            <button className="btn" onClick={() => setPairState('idle')}>Done</button>
+          </div>
+        </div>
+      )}
+
+      {list.length === 0 ? (
+        <p className="muted">
+          No devices. Start pairing to enroll your first J.A.R.V.S LINK — the one-time token is flashed on the
+          ESP32 through its serial console.
+        </p>
+      ) : (
+        <ul className="device-list">
+          {list.map((d) => {
+            const online = connected.has(d.device_id);
+            return (
+              <li key={d.device_id} className={d.paired ? '' : 'pending'}>
+                <div className="trow">
+                  <b>{d.name}</b>
+                  {d.paired ? (
+                    online ? (
+                      <span className="badge ok">ONLINE</span>
+                    ) : (
+                      <span className="badge">OFFLINE</span>
+                    )
+                  ) : (
+                    <span className="badge warn">Pending pairing</span>
+                  )}
+                </div>
+                <small className="meta">
+                  {d.device_id} · {d.kind} · fw {d.firmware || 'unknown'}
+                  {d.paired && ` · last seen ${d.last_seen_at ? fmtTime(d.last_seen_at) : 'never'}`}
+                  {!d.paired && ' · superseded when a new pairing code is generated'}
+                </small>
+                {d.paired && d.battery_pct != null && (
+                  <div className="tele">
+                    <span className="batt">
+                      <i style={{ '--fill': `${d.battery_pct}%` } as React.CSSProperties} />
+                      {d.battery_pct}%
+                    </span>
+                    {d.signal_dbm != null && <span className="muted">{d.signal_dbm} dBm</span>}
+                    {d.state ? <span className="muted">state: {d.state}</span> : null}
+                  </div>
+                )}
+                {d.paired && (
+                  <div className="row-actions">
+                    <button className="btn err" disabled={busy} onClick={() => revoke(d.device_id)}>Revoke</button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
