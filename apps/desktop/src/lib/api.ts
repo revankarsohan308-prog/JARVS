@@ -76,6 +76,32 @@ export interface MemoryRow {
   updated_at: string;
 }
 
+// Engine truth — these match core/tasks/service.py and core/memory/service.py.
+// The spec's richer statuses (TODO/IN_PROGRESS/BLOCKED/OVERDUE) are a future
+// engine upgrade, honestly NOT IMPLEMENTED today.
+export const TASK_STATUSES = ['pending', 'done', 'cancelled'] as const;
+export const TASK_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
+export const TASK_RECURRENCE = ['', 'daily', 'weekly', 'monthly'] as const;
+export const MEMORY_CATEGORIES = [
+  'PREFERENCES',
+  'IMPORTANT_FACTS',
+  'PROJECTS',
+  'TASKS',
+  'CONVERSATION_SUMMARY',
+] as const;
+
+export interface MemoryStats {
+  total: number;
+  by_category: Record<string, number>;
+}
+
+export interface MemoryExport {
+  exported_for: string;
+  category: string;
+  count: number;
+  memories: MemoryRow[];
+}
+
 export interface HealthCheck {
   status: string;
   version: string;
@@ -100,13 +126,65 @@ export const system = {
   health: () => api<HealthCheck>('/system/health'),
 };
 
+export interface TaskDraft {
+  title: string;
+  notes?: string;
+  priority?: string;
+  due_at?: string | null;
+  recurrence?: string;
+  reminder_at?: string | null;
+}
+
 export const tasks = {
-  list: (includeCompleted = false) =>
-    api<{ tasks: Task[] }>(`/tasks?include_completed=${includeCompleted}`),
+  list: (includeCompleted = false, day?: string) => {
+    const q = new URLSearchParams();
+    q.set('include_completed', String(includeCompleted));
+    if (day) q.set('day', day);
+    return api<{ tasks: Task[] }>(`/tasks?${q.toString()}`);
+  },
+  create: (input: TaskDraft) =>
+    api<{ ok: boolean; task: Task }>('/tasks', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: input.title,
+        notes: input.notes ?? '',
+        priority: input.priority ?? 'normal',
+        due_at: input.due_at || null,
+        recurrence: input.recurrence ?? '',
+        reminder_at: input.reminder_at || null,
+      }),
+    }),
+  update: (id: number, patch: Partial<TaskDraft & { status: string }>) =>
+    api<{ ok: boolean; task: Task }>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  complete: (id: number) =>
+    api<{ ok: boolean; task: Task }>(`/tasks/${id}/complete`, { method: 'POST' }),
+  remove: (id: number) =>
+    api<{ ok: boolean; deleted: number }>(`/tasks/${id}`, { method: 'DELETE' }),
+  clearCompleted: () =>
+    api<{ ok: boolean; deleted: number }>('/tasks/clear-completed', { method: 'POST' }),
 };
 
 export const memory = {
-  list: () => api<{ memories: MemoryRow[] }>('/memory'),
+  list: (category?: string) =>
+    api<{ memories: MemoryRow[]; stats: MemoryStats }>(
+      `/memory${category ? `?category=${encodeURIComponent(category)}` : ''}`,
+    ),
+  search: (q: string) =>
+    api<{ results: MemoryRow[] }>(`/memory/search?q=${encodeURIComponent(q)}`),
+  export: () => api<MemoryExport>('/memory/export'),
+  create: (input: { key: string; content: string; category?: string }) =>
+    api<{ ok: boolean; memory: MemoryRow }>('/memory', {
+      method: 'POST',
+      body: JSON.stringify({
+        key: input.key,
+        content: input.content,
+        category: input.category ?? 'IMPORTANT_FACTS',
+      }),
+    }),
+  update: (id: number, patch: { key?: string; content?: string; category?: string }) =>
+    api<{ ok: boolean; memory: MemoryRow }>(`/memory/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  remove: (id: number) =>
+    api<{ ok: boolean; deleted: number }>(`/memory/${id}`, { method: 'DELETE' }),
 };
 
 export const chat = {
