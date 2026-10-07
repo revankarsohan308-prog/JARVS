@@ -87,7 +87,13 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://127.0.0.1:8760", "http://localhost:8760"],
+        allow_origins=[
+            "http://127.0.0.1:8760",
+            "http://localhost:8760",
+            # Desktop web UI (Vite dev server) — Phase 2
+            "http://127.0.0.1:5173",
+            "http://localhost:5173",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -189,6 +195,10 @@ def create_app() -> FastAPI:
 
     # Web interface (served only if present).
     web_dir = PROJECT_ROOT / "apps" / "web"
+    # Desktop command center (built React app; same-origin for the Electron
+    # shell so no CORS and the HttpOnly session cookie works). Must be mounted
+    # before the "/" web mount so it cannot be shadowed.
+    desktop_dir = PROJECT_ROOT / "apps" / "desktop" / "dist"
 
     # Development-only diagnostics page (spec §6/§7). Never exposed in
     # production; the report contains no secrets. Registered before the
@@ -201,6 +211,9 @@ def create_app() -> FastAPI:
         if not page.is_file():
             raise HTTPException(status_code=404, detail="Diagnostics page not found.")
         return FileResponse(page)
+
+    if desktop_dir.is_dir():
+        app.mount("/jarvis", NoCacheStaticFiles(directory=str(desktop_dir), html=True), name="desktop")
 
     if web_dir.is_dir():
         app.mount("/", NoCacheStaticFiles(directory=str(web_dir), html=True), name="web")
