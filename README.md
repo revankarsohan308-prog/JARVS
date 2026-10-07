@@ -46,7 +46,7 @@ Wake word: **"Hey Jarvis"**. The engine implements the working core — real aut
 
 ```powershell
 # Windows (PowerShell)
-cd C:\Users\User\Projects\ALYO
+cd C:\Users\User\Projects\JARVS
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
 copy .env.example .env        # optional — sensible defaults work out of the box
@@ -57,10 +57,35 @@ Open <http://127.0.0.1:8760>. The **first account you register becomes the
 SUPER_ADMIN**; every later registration starts as STUDENT.
 
 ```powershell
-# Run the test suite (98 tests) and the linter
+# Run the test suite (109 tests) and the linter
 .\.venv\Scripts\python -m pytest -q
 .\.venv\Scripts\python -m ruff check .
 ```
+
+## Desktop app (J.A.R.V.S command center)
+
+A real Windows desktop window (Electron + React + TypeScript) that talks to
+the backend. One-click launcher:
+
+```bat
+scripts\start-jarvis-desktop.bat
+```
+
+Or manually (backend first, then the shell):
+
+```powershell
+cd C:\Users\User\Projects\JARVS
+.\.venv\Scripts\python main.py                 # terminal 1: backend on :8760
+
+cd apps\desktop
+npm install                                    # once
+npm run build
+npx electron .
+```
+
+The shell loads the built UI from the backend at `http://127.0.0.1:8760/jarvis/`
+(same-origin — session cookie works, no CORS). For UI-only development with
+hot reload: `cd apps\desktop && npm run dev` and open <http://localhost:5173>.
 
 ## Configuration
 
