@@ -59,6 +59,18 @@ def test_dev_diagnostics_page_disabled_in_production(client, monkeypatch):
     assert "disabled" in resp.json()["detail"].lower()
 
 
+def test_default_redirect_base_shows_localhost_for_wildcard_bind(monkeypatch):
+    """0.0.0.0 is a bind address, never a pasteable OAuth callback URL."""
+    from config.settings import settings
+    from core.identity.oauth import default_redirect_base
+
+    monkeypatch.setattr(settings, "app_host", "0.0.0.0")
+    assert default_redirect_base() == "http://127.0.0.1:8760"
+
+    monkeypatch.setattr(settings, "app_host", "192.168.1.20")
+    assert default_redirect_base() == "http://192.168.1.20:8760"
+
+
 def test_health_reports_ai_provider_honestly(client, monkeypatch):
     from config.settings import settings
 

@@ -65,7 +65,9 @@ async function renderAuthStatus() {
     const db = health.checks?.database?.status === "ONLINE";
     const ai = health.checks?.ai_provider;
     const aiMode = ai?.mode || "local-rules";
-    const aiReady = aiMode !== "local-rules";
+    // ONLY a real cloud connection may be called "AI online" — a missing key
+    // is "degraded-to-local" and must be labelled honestly.
+    const aiReady = aiMode === "cloud" && ai?.available === true;
     const dbLabel = db ? '<span class="ok-dot"></span> Database connected' : '<span class="bad-dot"></span> Database offline';
     const aiLabel = aiReady
       ? '<span class="ok-dot"></span> AI online' + (ai?.model ? ` (${esc(ai.model)})` : "")
@@ -180,6 +182,7 @@ async function loadProviders() {
     const data = await api("/auth/oauth/providers");
     list = data.providers || [];
   } catch (_) { /* server unreachable — buttons stay hidden */ }
+  const firstUnconfigured = list.find((x) => !x.configured);
   document.querySelectorAll(".oauth-btn").forEach((btn) => {
     const p = list.find((x) => x.id === btn.dataset.provider);
     if (!p) {
@@ -200,6 +203,15 @@ async function loadProviders() {
       note.classList.remove("hidden");
     };
   });
+  // Auto-explain when a provider is unconfigured so the user never sees a
+  // mystery dead button: show the first missing config's remedy up front.
+  const note = $("oauth-note");
+  if (firstUnconfigured && firstUnconfigured.note && note) {
+    note.textContent = firstUnconfigured.note;
+    note.classList.remove("hidden");
+  } else if (note) {
+    note.classList.add("hidden");
+  }
 }
 
 /* ---------------- navigation ---------------- */

@@ -102,7 +102,14 @@ def default_redirect_base() -> str:
     """Origin used in setup instructions and the redirect URI."""
     if settings.public_base_url:
         return settings.public_base_url.rstrip("/")
-    return f"http://{settings.app_host}:{settings.app_port}"
+    host = settings.app_host
+    # app_host may be a wildcard bind address (0.0.0.0 / ::) which is NOT a
+    # valid callback URL — substitute localhost for the *displayed* setup
+    # instructions. The real redirect URI at runtime always comes from the
+    # incoming request, so this is display-only and stays honest.
+    if host in ("0.0.0.0", "::", ""):
+        host = "127.0.0.1"
+    return f"http://{host}:{settings.app_port}"
 
 
 def setup_requirements(provider: Provider) -> str:
