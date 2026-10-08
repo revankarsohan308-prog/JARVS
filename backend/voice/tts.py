@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from backend.voice.config import VoiceConfig
+from backend.voice.config import VoiceConfig, _installed
 
 
 class TTSError(Exception):
@@ -64,11 +64,29 @@ class EdgeTTS(TTSProvider):
         voice = self._config.tts_voice or "hi-IN-MadhurNeural"  # default: natural Hindi
         delta_pct = int(round((self._config.tts_rate - 1.0) * 100))
         communicate = edge_tts.Communicate(text, voice=voice, rate=f"{delta_pct:+d}%")
-        mp3 = b"".join(chunk async for chunk in communicate.stream())
+        # stream() yields {"type": "audio", "data": bytes, ...} dicts (edge-tts >=7).
+        import asyncio
+
+        loop = asyncio.new_event_loop()
+        parts: list[bytes] = []
+
+        async def _collect() -> None:
+            async for chunk in communicate.stream():
+                if isinstance(chunk, dict):
+                    if chunk.get("type") == "audio" and chunk.get("data"):
+                        parts.append(chunk["data"])
+                elif chunk:
+                    parts.append(chunk)
+
+        loop.run_until_complete(_collect())
+        loop.close()
+        mp3 = b"".join(parts)
+        if not mp3:
+            raise TTSError("TTS OFFLINE — the edge-tts stream returned no audio.")
 
         decoded = miniaudio.decode(
             mp3,
-            output_format=miniaudio.SampleFormat.SIGN16,
+            output_format=miniaudio.SampleFormat.SIGNED16,
             nchannels=self._config.channels,
             sample_rate=self._config.sample_rate,
         )
@@ -93,6 +111,14 @@ def tts_status(config: VoiceConfig) -> dict:
             "kn-IN-GaganNeural": "Kannada",
             "hi-IN-MadhurNeural": "Hindi",
         }
+        if not (_installed("edge_tts") and _installed("miniaudio")):
+            return {
+                "provider": "edge",
+                "voice": config.tts_voice or "hi-IN-MadhurNeural",
+                "available": False,
+                "detail": "TTS OFFLINE — install edge-tts and miniaudio "
+                "(pip install edge-tts miniaudio) then restart the voice server.",
+            }
         return {
             "provider": "edge",
             "voice": config.tts_voice or "hi-IN-MadhurNeural",

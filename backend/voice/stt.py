@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from backend.voice.config import VoiceConfig
+from backend.voice.config import VoiceConfig, _installed
 
 
 class STTError(Exception):
@@ -94,14 +94,27 @@ def get_stt(config: VoiceConfig) -> STTProvider:
 
 
 def stt_status(config: VoiceConfig) -> dict:
-    """Honest capabilities report used by /health on the voice server."""
+    """Honest capabilities report used by /health on the voice server.
+
+    ``available`` reflects whether the engine is actually importable right
+    now — setting the env var alone never claims availability.
+    """
     if config.stt_provider == "whisper":
+        if not _installed("faster_whisper"):
+            return {
+                "provider": "whisper",
+                "model": config.stt_model,
+                "language": config.stt_language or "auto",
+                "available": False,
+                "detail": "STT OFFLINE — faster-whisper is not installed. Run "
+                "pip install faster-whisper then restart the voice server.",
+            }
         return {
             "provider": "whisper",
             "model": config.stt_model,
             "language": config.stt_language or "auto",
             "available": True,
-            "detail": "Local faster-whisper; requires pip install faster-whisper on first use.",
+            "detail": "Local faster-whisper; the model downloads on first use.",
         }
     return {
         "provider": "none",

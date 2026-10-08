@@ -113,7 +113,10 @@ def create_voice_app(
 
         tts = get_tts(config)
         try:
-            pcm = await run_in_threadpool(tts.synthesize, reply)
+            if hasattr(tts.synthesize, "__call__") and asyncio.iscoroutinefunction(tts.synthesize):
+                pcm = await tts.synthesize(reply)
+            else:
+                pcm = await run_in_threadpool(tts.synthesize, reply)
         except TTSError as exc:
             # The text reply was already delivered; audio is honestly offline.
             await device_manager.send_json(
