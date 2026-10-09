@@ -16,6 +16,7 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -139,7 +140,12 @@ class ConversationTurn(Base):
 
 
 class Memory(Base):
-    """Long-term memory. User-controlled; secrets are rejected at write time."""
+    """Long-term memory. User-controlled; secrets are rejected at write time.
+
+    Quality metadata (Reliability Addendum Module 4) makes each memory's
+    trustworthiness inspectable: confidence, importance, verification state,
+    provenance and a retention policy with an optional expiry.
+    """
 
     __tablename__ = "memories"
     __table_args__ = (UniqueConstraint("user_id", "category", "key", name="uq_mem_user_cat_key"),)
@@ -150,8 +156,44 @@ class Memory(Base):
     key: Mapped[str] = mapped_column(String(128), index=True)
     content: Mapped[str] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(32), default="user")  # user | assistant
+    # 0.0-1.0 self-reported certainty; lowered when a contradiction is found.
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    importance: Mapped[int] = mapped_column(Integer, default=3)  # 1 (trivial) - 5 (critical)
+    # UNVERIFIED | USER_VERIFIED | CONFLICT | EXPIRED
+    verification_state: Mapped[str] = mapped_column(String(24), default="UNVERIFIED", index=True)
+    source_ref: Mapped[str] = mapped_column(String(255), default="")  # where the fact came from
+    retention_policy: Mapped[str] = mapped_column(String(24), default="KEEP")  # KEEP | WINDOW
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class MemoryRevision(Base):
+    """A superseded memory value, preserved so corrections are never silent.
+
+    When a memory is overwritten, corrected or merged, the previous value is
+    written here first. This is what makes contradiction handling auditable
+    instead of a destructive overwrite (Reliability Addendum Module 4).
+    """
+
+    __tablename__ = "memory_revisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    memory_id: Mapped[int] = mapped_column(
+        ForeignKey("memories.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    category: Mapped[str] = mapped_column(String(48), default="")
+    key: Mapped[str] = mapped_column(String(128), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(32), default="")
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    importance: Mapped[int] = mapped_column(Integer, default=3)
+    verification_state: Mapped[str] = mapped_column(String(24), default="")
+    reason: Mapped[str] = mapped_column(String(64), default="")  # overwrite|correction|merge|revert
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
 class Task(Base):
@@ -180,6 +222,9 @@ class AuditLog(Base):
     actor: Mapped[str] = mapped_column(String(96), default="system")  # user:username or system
     detail: Mapped[str] = mapped_column(Text, default="")
     component: Mapped[str] = mapped_column(String(64), default="core")
+    # Groups every audit row that belongs to one logical action (e.g. a mission
+    # or a request), so its full trail can be reconstructed (Module 3).
+    correlation_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
@@ -239,5 +284,295 @@ class Incident(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class ComponentStatusRecord(Base):
+    """Persistent per-component health (Reliability Addendum Module 1).
+
+    One row per monitored component. "Configured" is never assumed to mean
+    healthy: the status only ever reflects the last real probe result.
+    """
+
+    __tablename__ = "component_status"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    component: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # HEALTHY|DEGRADED|OFFLINE|FAILED|NOT_CONFIGURED|UNKNOWN|RECOVERING
+    status: Mapped[str] = mapped_column(String(24), default="UNKNOWN", index=True)
+    severity: Mapped[str] = mapped_column(String(16), default="INFO")  # INFO|LOW|MEDIUM|HIGH|CRITICAL
+    detail: Mapped[str] = mapped_column(Text, default="")
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    recovery_strategy: Mapped[str] = mapped_column(String(48), default="")
+    diagnostics_json: Mapped[str] = mapped_column(Text, default="{}")
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class RecoveryAttempt(Base):
+    """One recovery episode for one component (Reliability Addendum Module 1).
+
+    Outcomes are truthful: SUCCESS only when the component was re-verified
+    healthy after the recovery action.
+    """
+
+    __tablename__ = "recovery_attempts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    component: Mapped[str] = mapped_column(String(64), index=True)
+    strategy: Mapped[str] = mapped_column(String(48), default="")
+    # SUCCESS|FAILED|GAVE_UP|SKIPPED_COOLDOWN|SKIPPED_UNSAFE|SKIPPED_NOT_CONFIGURED
+    outcome: Mapped[str] = mapped_column(String(24), index=True)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    probes: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+# ----------------------------------------------------------------------
+# Missions (Reliability Addendum Module 2)
+# ----------------------------------------------------------------------
+
+class Mission(Base):
+    """A persistent, checkpointed objective owned by exactly one user.
+
+    State is durable so a mission survives application restarts: an
+    interrupted RUNNING mission is reconciled to PAUSED on boot and can be
+    resumed explicitly. An approval is bound to the plan hash it approved.
+    """
+
+    __tablename__ = "missions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "idempotency_key", name="uq_mission_user_idem"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    objective: Mapped[str] = mapped_column(Text)
+    # PLANNING|WAITING_FOR_APPROVAL|READY|RUNNING|PAUSED|RECOVERING|VERIFYING|
+    # COMPLETED|PARTIALLY_COMPLETED|FAILED|CANCELLED
+    state: Mapped[str] = mapped_column(String(24), default="PLANNING", index=True)
+    risk_level: Mapped[str] = mapped_column(String(16), default="LOW")
+    progress: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Idempotency key so a retried client request cannot create two missions.
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    correlation_id: Mapped[str] = mapped_column(String(32), default=new_id, index=True)
+    plan_hash: Mapped[str] = mapped_column(String(64), default="")
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    verification_json: Mapped[str] = mapped_column(Text, default="{}")
+    final_report: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class MissionStep(Base):
+    """One authorized step of a mission plan, executed one at a time."""
+
+    __tablename__ = "mission_steps"
+    __table_args__ = (
+        UniqueConstraint("mission_id", "position", name="uq_mission_step_position"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    mission_id: Mapped[str] = mapped_column(
+        ForeignKey("missions.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(255))
+    tool_name: Mapped[str] = mapped_column(String(64))
+    args_json: Mapped[str] = mapped_column(Text, default="{}")
+    depends_on_json: Mapped[str] = mapped_column(Text, default="[]")  # list of positions
+    # PENDING|WAITING_FOR_APPROVAL|RUNNING|COMPLETED|FAILED|SKIPPED|CANCELLED|
+    # UNKNOWN_VERIFICATION
+    state: Mapped[str] = mapped_column(String(24), default="PENDING", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=2)
+    risk_level: Mapped[str] = mapped_column(String(16), default="LOW")
+    irreversible: Mapped[bool] = mapped_column(Boolean, default=False)
+    requires_approval: Mapped[bool] = mapped_column(Boolean, default=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), default="", index=True)
+    verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    result_json: Mapped[str] = mapped_column(Text, default="")
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class MissionCheckpoint(Base):
+    """Durable progress marker written after each verified step."""
+
+    __tablename__ = "mission_checkpoints"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    mission_id: Mapped[str] = mapped_column(
+        ForeignKey("missions.id", ondelete="CASCADE"), index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, default=0)
+    state: Mapped[str] = mapped_column(String(24), default="")
+    label: Mapped[str] = mapped_column(String(255), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class MissionEvent(Base):
+    """Append-style execution history for a mission (audit correlation)."""
+
+    __tablename__ = "mission_events"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    mission_id: Mapped[str] = mapped_column(
+        ForeignKey("missions.id", ondelete="CASCADE"), index=True
+    )
+    event: Mapped[str] = mapped_column(String(64), index=True)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    actor: Mapped[str] = mapped_column(String(96), default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class MissionApproval(Base):
+    """Human approval request/decision bound to a specific plan hash.
+
+    If the plan changes after approval is requested, the approval is stale and
+    a fresh decision is required (Reliability Addendum Module 3).
+    """
+
+    __tablename__ = "mission_approvals"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    mission_id: Mapped[str] = mapped_column(
+        ForeignKey("missions.id", ondelete="CASCADE"), index=True
+    )
+    plan_hash: Mapped[str] = mapped_column(String(64), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    decision: Mapped[str] = mapped_column(String(16), default="PENDING", index=True)
+    # PENDING|APPROVED|DENIED|STALE
+    decided_by: Mapped[str] = mapped_column(String(96), default="")
+    requested_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 Index("ix_tasks_user_status", Task.user_id, Task.status)
 Index("ix_turns_user_created", ConversationTurn.user_id, ConversationTurn.created_at)
+
+
+class ReleaseRun(Base):
+    """A stored release-gate run (Reliability Addendum Module 6).
+
+    The gate never deploys — it records what it observed so the last verdict is
+    inspectable and a deploy can be blocked on real, cited failures.
+    """
+
+    __tablename__ = "release_runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    profile: Mapped[str] = mapped_column(String(32), default="full")
+    status: Mapped[str] = mapped_column(String(16), default="NOT_RUN", index=True)
+    deploy_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    triggered_by: Mapped[str] = mapped_column(String(96), default="system")
+    items_json: Mapped[str] = mapped_column(Text, default="[]")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Notification(Base):
+    """A durable, de-duplicated notification (Reliability Addendum Module 8).
+
+    Severity-aware: the engine de-duplicates repeats within a cooldown window,
+    tracks delivery/read/acknowledgement, and escalates unacknowledged
+    high-severity items. External channels are NOT_CONFIGURED — only the real
+    in-app channel is ever claimed as working.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    category: Mapped[str] = mapped_column(String(24), default="SYSTEM", index=True)
+    severity: Mapped[str] = mapped_column(String(16), default="INFO", index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str] = mapped_column(Text, default="")
+    dedup_key: Mapped[str] = mapped_column(String(160), default="", index=True)
+    # UNREAD | READ | ACKNOWLEDGED | ESCALATED
+    status: Mapped[str] = mapped_column(String(16), default="UNREAD", index=True)
+    channel: Mapped[str] = mapped_column(String(24), default="IN_APP")
+    occurrences: Mapped[int] = mapped_column(Integer, default=1)
+    correlation_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class NotificationPreference(Base):
+    """Per-user notification preferences (Reliability Addendum Module 8)."""
+
+    __tablename__ = "notification_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    min_severity: Mapped[str] = mapped_column(String(16), default="INFO")
+    muted_categories_json: Mapped[str] = mapped_column(Text, default="[]")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class SyncRecord(Base):
+    """Current synchronised value of one entity, per user (Module 5).
+
+    Optimistic concurrency: each record carries a monotonically increasing
+    ``version``. A client push states the version it based its edit on; if the
+    server has moved on, that is a real conflict and is never silently
+    overwritten. Sensitive entities always require explicit resolution.
+    """
+
+    __tablename__ = "sync_records"
+    __table_args__ = (
+        UniqueConstraint("user_id", "entity_type", "entity_key", name="uq_sync_entity"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    entity_type: Mapped[str] = mapped_column(String(32), index=True)
+    entity_key: Mapped[str] = mapped_column(String(255))
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    op: Mapped[str] = mapped_column(String(16), default="UPSERT")  # UPSERT | DELETE
+    device_id: Mapped[str] = mapped_column(String(64), default="")
+    sensitive: Mapped[bool] = mapped_column(Boolean, default=False)
+    conflict_state: Mapped[str] = mapped_column(String(24), default="NONE")  # NONE | CONFLICT
+    pending_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pending_device_id: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class SyncChange(Base):
+    """Append-only change log; ``id`` is the sync cursor (Module 5).
+
+    ``client_change_id`` makes offline queue retries idempotent: replaying the
+    same client change never applies twice.
+    """
+
+    __tablename__ = "sync_changes"
+    __table_args__ = (
+        UniqueConstraint("user_id", "client_change_id", name="uq_sync_client_change"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    entity_type: Mapped[str] = mapped_column(String(32), index=True)
+    entity_key: Mapped[str] = mapped_column(String(255))
+    op: Mapped[str] = mapped_column(String(16), default="UPSERT")
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    device_id: Mapped[str] = mapped_column(String(64), default="")
+    client_change_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)

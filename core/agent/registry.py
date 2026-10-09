@@ -20,10 +20,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from core.health.recovery import OutcomeUnknown
 from core.permissions.rbac import Permission, has_permission
 from database.models import PendingConfirmation, new_id
 from security.audit import audit
-
 
 class PermissionLevel(StrEnum):
     SAFE = "SAFE"  # runs immediately
@@ -44,6 +44,12 @@ class ToolSpec:
     unavailable_reason: str = ""
     settings_flag: str = ""  # settings attribute that must be truthy, if any
     requires_tool_confirm: bool = False  # RESTRICTED needs tool:restricted too
+    # Risk classification (Reliability Addendum Module 3). Drives mission
+    # approval requirements and autonomy boundaries.
+    risk_level: str = "LOW"  # LOW | MEDIUM | HIGH | CRITICAL
+    # True when repeating the action could duplicate a real-world effect
+    # (e.g. an external send or a permanent delete).
+    irreversible: bool = False
 
 
 @dataclass
@@ -196,6 +202,7 @@ def execute_tool(
     settings_obj: Any,
     actor: str,
     confirmed: bool = False,
+    correlation_id: str | None = None,
 ) -> ExecutionResult:
     """The one path through which a tool may run."""
     allowed, needs_confirmation, reason = registry.check_permission(
@@ -206,7 +213,8 @@ def execute_tool(
             confirmation_id = create_confirmation(
                 db, user_id, spec.name, args, _summarize(spec, args)
             )
-            audit(db, "tool_awaiting_confirmation", f"tool={spec.name}", actor=actor, component="agent")
+            audit(db, "tool_awaiting_confirmation", f"tool={spec.name}", actor=actor,
+                  component="agent", correlation_id=correlation_id)
             return ExecutionResult(
                 ok=False,
                 verified=False,
@@ -215,15 +223,23 @@ def execute_tool(
                 message=_summarize(spec, args),
             )
         audit(db, "tool_permission_denied", f"tool={spec.name} reason={reason}",
-              actor=actor, component="agent")
+              actor=actor, component="agent", correlation_id=correlation_id)
         return ExecutionResult(ok=False, verified=False, denied_reason=reason, message=reason)
 
     try:
         raw = spec.handler(db, args, user_id=user_id, role=role)
+    except OutcomeUnknown as exc:
+        # The handler cannot tell whether the action took effect (timeout,
+        # ambiguous external response). We must not report failure, and the
+        # caller must inspect real state before any retry.
+        db.rollback()
+        audit(db, "tool_outcome_unknown", f"tool={spec.name} error={type(exc).__name__}",
+              actor=actor, component="agent", correlation_id=correlation_id)
+        raise
     except Exception as exc:  # handlers raise user-facing errors
         db.rollback()
         audit(db, "tool_error", f"tool={spec.name} error={type(exc).__name__}: {exc}",
-              actor=actor, component="agent")
+              actor=actor, component="agent", correlation_id=correlation_id)
         return ExecutionResult(ok=False, verified=False, message=str(exc))
 
     if not isinstance(raw, dict):
@@ -236,10 +252,41 @@ def execute_tool(
         f"tool={spec.name} ok={ok} verified={verified}",
         actor=actor,
         component="agent",
+        correlation_id=correlation_id,
     )
     return ExecutionResult(ok=ok, verified=verified, data=raw, message=str(raw.get("message", "")))
 
 
 def _summarize(spec: ToolSpec, args: dict[str, Any]) -> str:
     readable = ", ".join(f"{k}={v}" for k, v in list(args.items())[:5])
-    return f"Confirm: {spec.name}({readable})"
+    reversible = "PERMANENT (cannot be undone)" if spec.irreversible else "reversible"
+    return (
+        f"Confirm: {spec.name}({readable}) — risk {spec.risk_level}, "
+        f"{reversible}, permission {spec.permission_level.value}"
+    )
+
+
+# ----------------------------------------------------------------------
+# Risk classification (Reliability Addendum Module 3)
+# ----------------------------------------------------------------------
+
+RISK_LEVELS = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
+
+
+def risk_rank(level: str) -> int:
+    try:
+        return RISK_LEVELS.index(level)
+    except ValueError:
+        return 0
+
+
+def max_risk(*levels: str) -> str:
+    return max(levels, key=risk_rank) if levels else "LOW"
+
+
+def tool_requires_approval(spec: ToolSpec) -> bool:
+    """An action needs explicit approval if it is gated or high-risk."""
+    return spec.permission_level != PermissionLevel.SAFE or spec.risk_level in (
+        "HIGH",
+        "CRITICAL",
+    )

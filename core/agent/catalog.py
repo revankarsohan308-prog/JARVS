@@ -244,6 +244,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
             },
             handler=_memory_store,
             required_permission=Permission.MEMORY_WRITE,
+            risk_level="MEDIUM",
         )
     )
     registry.register(
@@ -270,6 +271,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
             },
             handler=_task_create,
             required_permission=Permission.TASK_WRITE,
+            risk_level="MEDIUM",
         )
     )
     registry.register(
@@ -295,6 +297,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
             },
             handler=_task_complete,
             required_permission=Permission.TASK_WRITE,
+            risk_level="MEDIUM",
         )
     )
     registry.register(
@@ -309,5 +312,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
             handler=_task_delete,
             permission_level=PermissionLevel.CONFIRMATION_REQUIRED,
             required_permission=Permission.TASK_DELETE,
+            risk_level="HIGH",
+            irreversible=True,
         )
     )

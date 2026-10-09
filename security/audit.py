@@ -37,24 +37,40 @@ def audit(
     *,
     actor: str = "system",
     component: str = "core",
+    correlation_id: str | None = None,
 ) -> AuditLog:
-    """Record an audited event. Commits immediately so it survives later failures."""
+    """Record an audited event. Commits immediately so it survives later failures.
+
+    ``correlation_id`` ties every row belonging to one logical action together
+    (a mission, a request) so the full trail can be reconstructed later.
+    """
     entry = AuditLog(
         event=event_name,
         actor=actor,
         detail=sanitize(detail),
         component=component,
+        correlation_id=correlation_id,
     )
     db.add(entry)
     db.commit()
     return entry
 
 
-def recent_events(db: Session, limit: int = 100) -> list[AuditLog]:
+def recent_events(
+    db: Session, limit: int = 100, correlation_id: str | None = None
+) -> list[AuditLog]:
+    query = db.query(AuditLog)
+    if correlation_id:
+        query = query.filter(AuditLog.correlation_id == correlation_id)
+    return query.order_by(AuditLog.id.desc()).limit(min(limit, 500)).all()
+
+
+def trail(db: Session, correlation_id: str) -> list[AuditLog]:
+    """Full chronological trail for one correlation id (oldest first)."""
     return (
         db.query(AuditLog)
-        .order_by(AuditLog.id.desc())
-        .limit(min(limit, 500))
+        .filter(AuditLog.correlation_id == correlation_id)
+        .order_by(AuditLog.id.asc())
         .all()
     )
 

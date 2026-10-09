@@ -82,6 +82,29 @@ class Settings(BaseSettings):
     retention_task_history_days: int = 30
     retention_worker_interval_minutes: int = 60
 
+    # Reliability / health & recovery (Reliability Addendum Module 1) -------
+    # Bounded retries: an operation never retries past these limits.
+    health_recovery_max_attempts: int = 3
+    health_retry_base_delay_seconds: float = 0.2
+    health_retry_max_delay_seconds: float = 5.0
+    # Cooldown between recovery episodes per component (retry-storm guard).
+    health_recovery_cooldown_seconds: int = 300
+    # Timeout for a single external probe (never hangs a health request).
+    health_probe_timeout_seconds: float = 5.0
+    # A worker without a heartbeat for this long is reported DEGRADED.
+    health_worker_stale_seconds: int = 900
+
+    # Missions (Reliability Addendum Module 2) -----------------------------
+    mission_step_max_attempts: int = 2
+    mission_max_steps: int = 25
+    mission_retry_base_delay_seconds: float = 0.2
+    mission_default_deadline_minutes: int = 0  # 0 = no default deadline
+
+    # Notifications (Reliability Addendum Module 8) -------------------------
+    notifications_enabled: bool = True
+    notification_cooldown_seconds: int = 900  # default dedup window
+    notification_escalation_minutes: int = 60  # unacked HIGH/CRITICAL escalates
+
     # Security --------------------------------------------------------------
     auto_containment_enabled: bool = True
     high_security_plan_price: int = 699

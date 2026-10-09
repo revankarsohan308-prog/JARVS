@@ -3,17 +3,25 @@
 from __future__ import annotations
 
 import platform
+from typing import Annotated
 
 import psutil
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy import text
 
-from api.deps import CurrentUser, DbDep
+from api.deps import CurrentUser, DbDep, require_permission
 from config.settings import settings
 from core.brain.providers import provider_status
 from core.identity import oauth
+from core.permissions.rbac import Permission
+from database.models import User
 
 router = APIRouter(prefix="/system", tags=["system"])
+
+# Component health exposes operational diagnostics: gated by system:read
+# (every authenticated non-guest role), and free of private user content.
+SystemReader = Annotated[User, Depends(require_permission(Permission.SYSTEM_READ))]
 
 
 @router.get("/diagnostics")
@@ -102,6 +110,32 @@ def health(db: DbDep):
     }
 
 
+@router.get("/health/components")
+def health_components(db: DbDep, user: SystemReader):
+    """Full component health sweep with recovery (Reliability Addendum M1).
+
+    Runs every registered probe for real, persists component status, and
+    performs bounded recovery where it is safe. No secrets are ever included
+    in diagnostics — only configuration variable names.
+    """
+    from core.health import service as health_service
+
+    report = health_service.run_all(db)
+    report["recovery_history"] = health_service.recovery_history(db)
+    return report
+
+
+@router.get("/health/components/{component}")
+def health_component(component: str, db: DbDep, user: SystemReader):
+    """Probe a single component (real check + safe bounded recovery)."""
+    from core.health import service as health_service
+
+    try:
+        return health_service.run_component(db, component)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown component: {component}.") from None
+
+
 @router.get("/metrics")
 def metrics(user: CurrentUser):
     """Live OS metrics via psutil — real samples, not placeholders."""
@@ -164,3 +198,41 @@ def boot(db: DbDep):
             },
         },
     }
+
+
+ReleaseReader = Annotated[User, Depends(require_permission(Permission.RELEASE_READ))]
+ReleaseRunner = Annotated[User, Depends(require_permission(Permission.RELEASE_RUN))]
+
+
+class ReleaseRunIn(BaseModel):
+    only: list[str] | None = None
+    skip: list[str] | None = None
+
+
+@router.get("/release")
+def release_latest(user: ReleaseReader, db: DbDep):
+    """The last recorded release-gate verdict (NOT_RUN until one exists)."""
+    from core.release import service as release_service
+
+    return release_service.latest(db)
+
+
+@router.post("/release/run")
+def release_run(body: ReleaseRunIn, user: ReleaseRunner, db: DbDep):
+    """Run the release gate. Observational only: it never deploys.
+
+    Critical failures (tests, lint, secret scan, security regression) set
+    deploy_blocked=true. NOT_CONFIGURED checks are reported, never faked green.
+    """
+    from core.release import service as release_service
+
+    try:
+        report = release_service.run_and_store(
+            db,
+            triggered_by=f"user:{user.username}",
+            only=body.only,
+            skip=body.skip,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return report

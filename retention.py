@@ -124,6 +124,12 @@ def apply_retention(db: Session, now=None) -> dict[str, int]:
         db.delete(row)
     deleted["resolved_confirmations"] = len(stale_conf)
 
+    # Memories with an explicit expiry past their window (Module 4). Memories
+    # with the default KEEP policy never age out here.
+    from core.memory import service as memory_service
+
+    deleted["expired_memories"] = memory_service.purge_expired(db, now)
+
     deleted["temporary_files"] = _purge_temp_files(now)
     db.commit()
     return deleted

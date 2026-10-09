@@ -28,10 +28,14 @@ class Permission(StrEnum):
     TASK_READ = "task:read"
     TASK_WRITE = "task:write"
     TASK_DELETE = "task:delete"
+    MISSION_READ = "mission:read"
+    MISSION_WRITE = "mission:write"
     SYSTEM_READ = "system:read"
     AUDIT_READ = "audit:read"
     SECURITY_READ = "security:read"
     SECURITY_MANAGE = "security:manage"
+    RELEASE_READ = "release:read"
+    RELEASE_RUN = "release:run"
     USER_MANAGE = "user:manage"
     TOOL_CONFIRM = "tool:confirm"
     TOOL_RESTRICTED = "tool:restricted"
@@ -44,6 +48,8 @@ _BASE = {
     Permission.MEMORY_WRITE,
     Permission.TASK_READ,
     Permission.TASK_WRITE,
+    Permission.MISSION_READ,
+    Permission.MISSION_WRITE,
     Permission.SYSTEM_READ,
 }
 
@@ -68,6 +74,8 @@ _ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
         Permission.AUDIT_READ,
         Permission.SECURITY_READ,
         Permission.SECURITY_MANAGE,
+        Permission.RELEASE_READ,
+        Permission.RELEASE_RUN,
         Permission.USER_MANAGE,
         Permission.TOOL_RESTRICTED,
     },

@@ -59,6 +59,18 @@ def create_app() -> FastAPI:
         db = SessionLocal()
         try:
             audit(db, "app_started", f"version={settings.app_version}", component="core")
+            # Safe resume after restart: park interrupted missions, never
+            # auto-run them (Reliability Addendum Module 2).
+            from core.missions import service as mission_service
+
+            interrupted = mission_service.reconcile_on_startup(db)
+            if interrupted:
+                audit(
+                    db,
+                    "missions_reconciled_on_startup",
+                    f"paused={interrupted}",
+                    component="missions",
+                )
         finally:
             db.close()
         _record_startup_findings()
@@ -170,15 +182,30 @@ def create_app() -> FastAPI:
         auth,
         brain,
         devices,
+        missions,
+        notifications,
         oauth,
         privacy,
         security,
+        sync,
         system,
         tasks,
     )
 
     prefix = "/api/v1"
-    for module in (auth, brain, devices, oauth, privacy, security, system, tasks):
+    for module in (
+        auth,
+        brain,
+        devices,
+        missions,
+        notifications,
+        oauth,
+        privacy,
+        security,
+        sync,
+        system,
+        tasks,
+    ):
         app.include_router(module.router, prefix=prefix)
 
     from api.v1 import memory as memory_routes
@@ -229,6 +256,12 @@ def _component_for(path: str) -> str:
         return "brain"
     if path.startswith("/api/v1/memory"):
         return "memory"
+    if path.startswith("/api/v1/missions"):
+        return "missions"
+    if path.startswith("/api/v1/notifications"):
+        return "notifications"
+    if path.startswith("/api/v1/sync"):
+        return "sync"
     if path.startswith("/api/v1/tasks"):
         return "tasks"
     if path.startswith("/api/v1/security"):
@@ -242,11 +275,15 @@ def _component_for(path: str) -> str:
 
 async def _retention_worker() -> None:
     """Idempotent scheduled purge (spec §16.7). Runs until cancelled."""
+    from core.health.service import record_worker_heartbeat
+
+    record_worker_heartbeat("retention")
     interval = max(settings.retention_worker_interval_minutes, 1) * 60
     while True:
         await asyncio.sleep(interval)
         try:
             await asyncio.to_thread(_run_retention_once)
+            record_worker_heartbeat("retention")
         except Exception:  # pragma: no cover - worker must not die silently
             logger.exception("retention worker iteration failed")
 
@@ -257,6 +294,13 @@ def _run_retention_once() -> dict:
     db = SessionLocal()
     try:
         result = apply_retention(db)
+        # Bounded escalation sweep for unacknowledged high-severity notices
+        # (Reliability Addendum Module 8). Re-raises at most once per window.
+        from core.notifications import service as notifications
+
+        escalated = notifications.escalate_stale(db)
+        if escalated:
+            result["escalated_notifications"] = escalated
         if any(v for k, v in result.items() if isinstance(v, int)):
             audit(db, "retention_cleanup", f"result={result}", component="privacy")
         return result

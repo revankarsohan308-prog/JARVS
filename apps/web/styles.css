@@ -197,6 +197,7 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
   border: 1px solid var(--line); color: var(--muted);
 }
 .pill.high { color: var(--warn); border-color: var(--warn); }
+.pill.warn { color: var(--warn); border-color: var(--warn); }
 .pill.done { color: var(--ok); border-color: var(--ok); }
 .pill.risk-LOW { color: var(--ok); border-color: var(--ok); }
 .pill.risk-MEDIUM { color: var(--warn); border-color: var(--warn); }
@@ -222,6 +223,10 @@ main { max-width: 900px; margin: 0 auto; padding: 1rem; }
 h3 { margin: 1.2rem 0 .5rem; font-size: .95rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1.2rem; }
 .toggles { display: flex; gap: 1.4rem; flex-wrap: wrap; margin-bottom: .6rem; }
+
+.control-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.control-head h3 { margin: 0; }
+.list-item .actions { margin-top: 0; flex-shrink: 0; }
 
 /* ---------- Social sign-in ---------- */
 .oauth-block { margin-top: 1.2rem; }

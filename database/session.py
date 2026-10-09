@@ -49,6 +49,15 @@ def get_db() -> Iterator[Session]:
 # Each entry: (table, column, column DDL). Idempotent, safe on every boot.
 _ADDITIVE_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("users", "email_verified", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("audit_logs", "correlation_id", "VARCHAR(32)"),
+    ("memories", "confidence", "FLOAT NOT NULL DEFAULT 1.0"),
+    ("memories", "importance", "INTEGER NOT NULL DEFAULT 3"),
+    ("memories", "verification_state", "VARCHAR(24) NOT NULL DEFAULT 'UNVERIFIED'"),
+    ("memories", "source_ref", "VARCHAR(255) NOT NULL DEFAULT ''"),
+    ("memories", "retention_policy", "VARCHAR(24) NOT NULL DEFAULT 'KEEP'"),
+    ("memories", "expires_at", "DATETIME"),
+    ("memories", "access_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("memories", "last_accessed_at", "DATETIME"),
 )
 
 

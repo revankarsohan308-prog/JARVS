@@ -14,11 +14,18 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
 from database.models import Base  # noqa: E402
+target_metadata = Base.metadata  # noqa: E402
 
-target_metadata = Base.metadata
+# Override URL from environment/settings if available
+try:
+    from config.settings import settings
+    db_url = settings.database_url
+    if db_url:
+        # For SQLite, ensure proper handling
+        config.set_main_option('sqlalchemy.url', db_url)
+except Exception:
+    pass
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

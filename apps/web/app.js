@@ -98,6 +98,7 @@ async function showApp() {
     loadSystem();
     loadSecurity();
     loadPrivacy();
+    loadControl();
     updateAiChip();
   } catch (err) {
     token = null;
@@ -636,6 +637,223 @@ $("delete-account-btn").addEventListener("click", async () => {
     toast(err.message, true);
   }
 });
+
+/* ---------------- control center (Reliability & Autonomous Ops) ---------------- */
+
+function healthClass(status) {
+  if (status === "HEALTHY") return "pill done";
+  if (status === "NOT_CONFIGURED") return "pill";
+  if (status === "DEGRADED" || status === "RECOVERING") return "pill warn";
+  return "pill risk-HIGH";
+}
+
+async function loadControl() {
+  await Promise.all([loadControlHealth(), loadControlMissions(), loadControlNotifications(),
+                     loadControlSync(), loadControlRelease()]);
+}
+
+async function loadControlHealth() {
+  const box = $("control-health");
+  try {
+    const report = await api("/system/health/components");
+    const components = report.components || [];
+    if (!components.length) {
+      box.innerHTML = `<div class="list-item"><span class="muted">No probes registered.</span></div>`;
+      return;
+    }
+    const degraded = components.filter((c) => !["HEALTHY", "NOT_CONFIGURED"].includes(c.status)).length;
+    $("control-cards").innerHTML =
+      card("Overall health", report.overall) +
+      card("Components", components.length) +
+      card("Needs attention", degraded);
+    box.innerHTML = components.map((c) => {
+      const rec = c.recovery ? ` · recovery ${esc(c.recovery.outcome)}` : "";
+      return `<div class="list-item">` +
+        `<div class="grow"><div class="title">${esc(c.component)}</div>` +
+        `<div class="sub">${esc(c.detail || "")}${rec}</div></div>` +
+        `<span class="${healthClass(c.status)}">${esc(c.status)}</span></div>`;
+    }).join("");
+  } catch (err) {
+    box.innerHTML = `<div class="list-item"><span class="muted">Health unavailable: ${esc(err.message)}</span></div>`;
+  }
+}
+
+async function loadControlMissions() {
+  const box = $("control-missions");
+  try {
+    const data = await api("/missions");
+    const missions = data.missions || [];
+    if (!missions.length) {
+      box.innerHTML = `<div class="list-item"><span class="muted">No missions yet.</span></div>`;
+      return;
+    }
+    box.innerHTML = "";
+    missions.forEach((m) => {
+      const row = document.createElement("div");
+      row.className = "list-item";
+      row.innerHTML =
+        `<div class="grow"><div class="title">${esc(m.objective)}</div>` +
+        `<div class="sub">${esc(m.state)} · ${m.progress}% · risk ${esc(m.risk_level)}` +
+        `${m.approval_required ? " · approval required" : ""}</div></div>`;
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const addBtn = (label, fn, cls) => {
+        const b = document.createElement("button");
+        b.textContent = label;
+        b.className = cls || "ghost";
+        b.onclick = fn;
+        actions.appendChild(b);
+      };
+      if (m.state === "WAITING_FOR_APPROVAL") {
+        addBtn("Approve", () => missionAction(m.id, "approve", { approve: true }), "primary");
+        addBtn("Deny", () => missionAction(m.id, "approve", { approve: false }));
+      }
+      if (m.state === "PLANNED") addBtn("Run", () => missionAction(m.id, "run"), "primary");
+      if (m.state === "RUNNING") addBtn("Pause", () => missionAction(m.id, "pause"));
+      if (m.state === "PAUSED") addBtn("Resume", () => missionAction(m.id, "resume"), "primary");
+      if (!["COMPLETED", "FAILED", "CANCELLED"].includes(m.state)) {
+        addBtn("Cancel", () => missionAction(m.id, "cancel"), "danger");
+      }
+      row.appendChild(actions);
+      box.appendChild(row);
+    });
+  } catch (err) {
+    box.innerHTML = `<div class="list-item"><span class="muted">Missions unavailable: ${esc(err.message)}</span></div>`;
+  }
+}
+
+async function missionAction(id, action, body) {
+  try {
+    await api(`/missions/${id}/${action}`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    });
+    toast(`Mission ${action} requested.`);
+    loadControlMissions();
+  } catch (err) {
+    toast(`Mission ${action}: ${err.message}`, true);
+  }
+}
+
+$("mission-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const objective = $("mission-objective").value.trim();
+  if (!objective) return;
+  const btn = e.target.querySelector("button");
+  btn.disabled = true;
+  try {
+    await api("/missions", { method: "POST", body: JSON.stringify({ objective }) });
+    $("mission-objective").value = "";
+    loadControlMissions();
+  } catch (err) {
+    // Honest: the planner refuses unplannable objectives instead of faking steps.
+    toast(`Mission not created: ${err.message}`, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function loadControlNotifications() {
+  const box = $("control-notifications");
+  try {
+    const data = await api("/notifications?limit=20");
+    const rows = data.notifications || [];
+    if (!rows.length) {
+      box.innerHTML = `<div class="list-item"><span class="muted">No notifications.</span></div>`;
+      return;
+    }
+    box.innerHTML = "";
+    rows.forEach((n) => {
+      const row = document.createElement("div");
+      row.className = "list-item";
+      row.innerHTML =
+        `<div class="grow"><div class="title">${esc(n.title)}${n.occurrences > 1 ? ` ×${n.occurrences}` : ""}</div>` +
+        `<div class="sub">${esc(n.category)} · ${esc(n.severity)} · ${esc(n.status)} · ${esc(fmtDate(n.created_at))}</div></div>`;
+      if (n.status !== "ACKNOWLEDGED") {
+        const ack = document.createElement("button");
+        ack.textContent = "Acknowledge";
+        ack.className = "ghost";
+        ack.onclick = async () => {
+          try { await api(`/notifications/${n.id}/ack`, { method: "POST" }); loadControlNotifications(); }
+          catch (err) { toast(err.message, true); }
+        };
+        row.appendChild(ack);
+      }
+      box.appendChild(row);
+    });
+  } catch (err) {
+    box.innerHTML = `<div class="list-item"><span class="muted">Notifications unavailable: ${esc(err.message)}</span></div>`;
+  }
+}
+
+async function loadControlSync() {
+  const box = $("control-sync");
+  try {
+    const state = await api("/sync/state");
+    const conflicts = (await api("/sync/conflicts")).conflicts || [];
+    if (!conflicts.length) {
+      box.innerHTML = `<div class="list-item"><span class="muted">In sync · cursor ${state.cursor} · ` +
+        `${state.records} records · no conflicts.</span></div>`;
+      return;
+    }
+    box.innerHTML = "";
+    conflicts.forEach((c) => {
+      const row = document.createElement("div");
+      row.className = "list-item";
+      row.innerHTML =
+        `<div class="grow"><div class="title">Conflict: ${esc(c.entity_type)} / ${esc(c.entity_key)}</div>` +
+        `<div class="sub">server v${c.version}` +
+        `${c.pending_payload ? " · incoming edit pending your decision" : ""}</div></div>`;
+      const local = document.createElement("button");
+      local.textContent = "Keep incoming";
+      local.className = "primary";
+      local.onclick = () => resolveSyncConflict(c, "local");
+      const remote = document.createElement("button");
+      remote.textContent = "Keep server";
+      remote.className = "ghost";
+      remote.onclick = () => resolveSyncConflict(c, "remote");
+      row.appendChild(local);
+      row.appendChild(remote);
+      box.appendChild(row);
+    });
+  } catch (err) {
+    box.innerHTML = `<div class="list-item"><span class="muted">Sync unavailable: ${esc(err.message)}</span></div>`;
+  }
+}
+
+async function resolveSyncConflict(c, keep) {
+  try {
+    await api("/sync/conflicts/resolve", {
+      method: "POST",
+      body: JSON.stringify({ entity_type: c.entity_type, entity_key: c.entity_key, keep }),
+    });
+    loadControlSync();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function loadControlRelease() {
+  const box = $("control-release");
+  try {
+    const data = await api("/system/release");
+    if (data.status === "NOT_RUN") {
+      box.innerHTML = `<div class="list-item"><span class="muted">${esc(data.detail || "Not run yet.")}</span></div>`;
+      return;
+    }
+    const items = (data.items || []).map((it) =>
+      `<div class="sub">[${esc(it.status)}] ${esc(it.id)}: ${esc(it.detail)}</div>`).join("");
+    box.innerHTML =
+      `<div class="list-item"><div class="grow">` +
+      `<div class="title">${esc(data.status)}` +
+      `${data.deploy_blocked ? " — deploy blocked" : ""}</div>${items}</div></div>`;
+  } catch (err) {
+    // Release data is RBAC-gated; a STUDENT simply cannot see it.
+    box.innerHTML = `<div class="list-item"><span class="muted">` +
+      `${err.status === 403 ? "Not permitted for your role." : "Release status unavailable: " + esc(err.message)}` +
+      `</span></div>`;
+  }
+}
+
+$("control-refresh").addEventListener("click", loadControl);
 
 /* ---------------- boot ---------------- */
 

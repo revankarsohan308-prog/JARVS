@@ -54,6 +54,7 @@
       </div>
       <nav id="nav">
         <button data-panel="chat" class="nav-btn active">Chat</button>
+        <button data-panel="control" class="nav-btn">Control</button>
         <button data-panel="tasks" class="nav-btn">Tasks</button>
         <button data-panel="memory" class="nav-btn">Memory</button>
         <button data-panel="system" class="nav-btn">System</button>
@@ -83,9 +84,36 @@
         </form>
       </section>
 
+      <!-- Control Center: reliability + autonomous operations -->
+      <section id="panel-control" class="panel">
+        <div class="control-head">
+          <h3>Control Center</h3>
+          <button id="control-refresh" class="ghost">Refresh</button>
+        </div>
+        <div class="cards" id="control-cards"></div>
+
+        <h3>Component health</h3>
+        <div id="control-health" class="list"></div>
+
+        <h3>Missions</h3>
+        <form id="mission-form" class="inline-form">
+          <input id="mission-objective" placeholder="Objective (e.g. &quot;remember corr_fact = yes&quot;)" maxlength="4000" required />
+          <button type="submit" class="primary">New mission</button>
+        </form>
+        <div id="control-missions" class="list"></div>
+
+        <h3>Notifications</h3>
+        <div id="control-notifications" class="list"></div>
+
+        <h3>Sync &amp; conflicts</h3>
+        <div id="control-sync" class="list"></div>
+
+        <h3>Release gate</h3>
+        <div id="control-release" class="list"></div>
+      </section>
+
       <!-- Tasks -->
-      <section id="panel-tasks" class="panel">
-        <form id="task-form" class="inline-form">
+      <section id="panel-tasks" class="panel">        <form id="task-form" class="inline-form">
           <input id="task-title" placeholder="New task title" required maxlength="300" />
           <select id="task-priority">
             <option value="normal">Normal</option>

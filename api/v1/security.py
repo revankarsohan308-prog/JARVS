@@ -101,9 +101,33 @@ def transition(incident_id: str, body: IncidentStateIn, user: SecurityManager, d
 
 
 @router.get("/audit")
-def audit_log(user: Auditor, db: DbDep, limit: int = 100):
-    rows = recent_events(db, limit=limit)
+def audit_log(user: Auditor, db: DbDep, limit: int = 100, correlation_id: str | None = None):
+    rows = recent_events(db, limit=limit, correlation_id=correlation_id)
     return {
+        "entries": [
+            {
+                "id": r.id,
+                "event": r.event,
+                "actor": r.actor,
+                "component": r.component,
+                "detail": r.detail,
+                "correlation_id": r.correlation_id,
+                "created_at": r.created_at.isoformat() + "Z",
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/audit/trail/{correlation_id}")
+def audit_trail(correlation_id: str, user: Auditor, db: DbDep):
+    """Reconstruct the full chronological trail of one logical action."""
+    from security.audit import trail
+
+    rows = trail(db, correlation_id)
+    return {
+        "correlation_id": correlation_id,
+        "count": len(rows),
         "entries": [
             {
                 "id": r.id,
@@ -114,7 +138,53 @@ def audit_log(user: Auditor, db: DbDep, limit: int = 100):
                 "created_at": r.created_at.isoformat() + "Z",
             }
             for r in rows
-        ]
+        ],
+    }
+
+
+@router.get("/tools")
+def tool_risk_catalog(user: SecurityReader, db: DbDep):
+    """Every registered tool with its real risk, reversibility and gating.
+
+    This is metadata read from the live registry — not a hand-written list.
+    """
+    from core.agent.registry import registry, tool_requires_approval
+
+    specs = sorted(registry.all_specs(), key=lambda s: s.name)
+    return {
+        "tools": [
+            {
+                "name": s.name,
+                "description": s.description,
+                "permission_level": s.permission_level.value,
+                "required_permission": str(s.required_permission),
+                "risk_level": s.risk_level,
+                "irreversible": s.irreversible,
+                "requires_approval": tool_requires_approval(s),
+            }
+            for s in specs
+        ],
+        "count": len(specs),
+    }
+
+
+@router.get("/policy")
+def autonomy_policy(user: SecurityReader, db: DbDep):
+    """The autonomy boundaries the engine actually enforces."""
+    from config.settings import settings
+
+    return {
+        "approval_required_when": (
+            "A tool is gated above SAFE, or its risk is HIGH/CRITICAL, or the "
+            "action is irreversible."
+        ),
+        "irreversible_actions_are_never_auto_retried": True,
+        "unknown_outcomes_are_never_blindly_repeated": True,
+        "max_plan_steps": settings.mission_max_steps,
+        "step_max_attempts": settings.mission_step_max_attempts,
+        "high_risk_repairs_require_approval": True,
+        "security_is_never_weakened_for_availability": True,
+        "secrets_are_never_written_to_logs": True,
     }
 
 
